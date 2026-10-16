@@ -19,7 +19,7 @@ The macOS and Windows apps share one version number.
 - Repository restructured: shared text catalog in `i18n/`, scrcpy downloaded and checksum-verified by `scripts/fetch-scrcpy.sh`.
 
 ### Notes
-- *Windows:* compiled from macOS, **not yet tested on a physical Windows PC**.
+- *Windows:* the 1.0.0 baseline was tested on a Windows PC and worked. The 1.1.0 additions (languages, both screens, staggered start) have so far been verified on macOS only — please report anything odd.
 
 ## [1.0.0]
 ### macOS — 2026-10-01
@@ -35,3 +35,4 @@ The macOS and Windows apps share one version number.
 - First Windows release, ported from the macOS app, with the same features.
 - Windows 11 look: Mica background, rounded cards, automatic light/dark theme.
 - Single self-contained `.exe` with scrcpy and adb embedded.
+- Tested on a physical Windows PC.

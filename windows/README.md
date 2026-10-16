@@ -5,7 +5,7 @@ A single `.exe`, with scrcpy and adb built in: nothing else to install.
 
 - **Requires:** Windows 11 (Mica background on 22H2 or newer) or Windows 10, 64-bit (x64; ARM PCs run it through emulation)
 - **Phone:** Android with USB debugging (built for a Xiaomi 18 Pro Max)
-- **Status:** compiled from macOS and **not yet tested on a physical Windows PC** — please report anything odd.
+- **Status:** version 1.0.0 was tested on a Windows PC and worked. The features added in 1.1.0 (languages, both screens) have so far been verified on macOS only — please report anything odd.
 
 ---
 
@@ -70,4 +70,4 @@ Delete `EcranArriere.exe`. To remove everything it created:
 - No audio is captured.
 - When recording both screens, the second video starts about 2.5 s after the first.
 - The app is not code-signed (hence the SmartScreen step above).
-- Not yet validated on real hardware — the clean stop of a recording (needed for a readable MP4) is the first thing to check.
+- The 1.1.0 additions (languages, both screens) are not yet validated on Windows hardware.
