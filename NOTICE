@@ -1,0 +1,19 @@
+Rear Screen — third-party components
+====================================
+
+The distributed apps bundle the following software. It is NOT covered by this
+project's MIT license; each component keeps its own license.
+
+scrcpy (v4.1)  — https://github.com/Genymobile/scrcpy
+  Copyright (C) Genymobile, Romain Vimont. Licensed under the Apache License 2.0.
+  The official release archives also contain, with their own licenses:
+    - adb (Android SDK Platform-Tools)  — Apache License 2.0
+    - SDL3                              — zlib license
+    - FFmpeg libraries                  — LGPL (see the scrcpy project for the exact terms of its builds)
+    - libusb                            — LGPL v2.1+
+  The license text shipped by scrcpy is included in the app (macOS: Contents/Resources/LICENSE;
+  Windows: LICENSE.txt, unpacked next to scrcpy.exe under %LOCALAPPDATA%\EcranArriere).
+  Source code of all components is available from the project links above.
+
+Rear Screen is an independent project. It is not affiliated with, endorsed or sponsored by
+Xiaomi, Google or Genymobile. "Xiaomi" and "Android" are trademarks of their respective owners.

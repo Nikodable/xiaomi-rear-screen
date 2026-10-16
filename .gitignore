@@ -1,0 +1,17 @@
+# downloads and build output
+third_party/
+**/dist/
+**/bin/
+**/obj/
+*.pdb
+
+# macOS / editors
+.DS_Store
+.vscode/
+.idea/
+.claude/
+
+# local captures and recordings
+ecran_*.mp4
+ecran_*.png
+*.mp4

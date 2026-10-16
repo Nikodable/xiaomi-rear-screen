@@ -1,0 +1,68 @@
+# Rear Screen — macOS install guide
+
+Mirror, record and take photos of your Xiaomi's **rear screen** (and front screen) on your Mac, over USB or Wi-Fi.
+Everything needed (scrcpy + adb) is built in: nothing else to install.
+
+- **Requires:** Mac with Apple Silicon (M1 or later), macOS 12 or newer — the Liquid Glass look needs macOS 26+, older versions get a classic translucent look
+- **Phone:** Android with USB debugging (built and tested with a Xiaomi 18 Pro Max)
+
+---
+
+## Installation
+
+### 1. Install the app
+1. Unzip `RearScreen-macOS-arm64-v<version>.zip`.
+2. Drag **Ecran arriere.app** into your **Applications** folder (or anywhere you like).
+3. **First launch only:** the app is not signed by Apple, so macOS will block a normal double-click.
+   Right-click (or Control-click) the app → **Open** → **Open**.
+   If macOS still refuses: *System Settings → Privacy & Security →* scroll down → **Open Anyway**.
+
+### 2. Prepare the phone (once)
+1. *Settings → About phone* → tap **OS version** (or *MIUI/HyperOS version*) **7 times** to unlock Developer options.
+2. *Settings → Additional settings → Developer options* → turn on **USB debugging**.
+   (Optional: also turn on *USB debugging (Security settings)* if you want to control the phone with the mouse.)
+3. Plug the phone into the Mac with a data-capable USB cable and choose **File transfer** as the USB mode.
+4. On the phone, accept **Allow USB debugging?** and tick **Always allow from this computer**.
+
+### 3. Use it
+Open the app. The phone's name appears in the *Phone* menu and the status reads **Phone connected ✓**.
+
+| Control | What it does |
+|---|---|
+| **Screen** menu | Front screen, rear screen, or **both screens** (default: rear) |
+| **Quality** menu | Light (4 Mb/s · 30 fps), Normal (8 Mb/s · 60 fps), Max (20 Mb/s · 120 fps) |
+| **Live mirror** | Opens a live window of the selected screen(s) |
+| **Record** | Records to MP4, with or without the live window |
+| **Photo** | Saves a PNG of the selected screen(s) |
+| **Switch to Wi-Fi** | With the phone plugged in, enables wireless mode — then unplug (phone and Mac on the same network) |
+| **Manual connection…** | Pair and connect over Wireless debugging (address + pairing code) |
+| Language menu (top right) | Français, English, Deutsch, Español, Italiano, Português |
+
+Files are saved in **`~/Movies/EcranArriere`**, named `ecran_<screen>_<date>_<time>` (`avant` = front, `arriere` = rear, `principal` = single-screen phones).
+
+### Showing both screens
+Choose **Both screens** in the *Screen* menu. Two windows open side by side, about 2.5 seconds apart. Recording produces two separate MP4 files.
+
+> **Stage Manager:** macOS shows only one app at a time on stage, so one mirror may sit as a thumbnail on the left.
+> Drag that thumbnail onto the stage, or Shift-click it, to see both. Turning Stage Manager off also works.
+
+---
+
+## Troubleshooting
+
+| Message | What to do |
+|---|---|
+| *No phone detected* | Check the cable (must carry data), set USB mode to **File transfer**, make sure USB debugging is on, then press **↻**. |
+| *Phone not authorized* | Unlock the phone and accept the USB debugging prompt (tick **Always allow**). |
+| *Phone offline* | Unplug and replug the cable, or switch USB debugging off and on. |
+| Black video | The screen being captured is off — wake it up (the rear screen must be on). |
+| Recording file is unreadable | Always stop with the **Stop** button or by closing the app window, not by force-quitting. |
+
+## Uninstall
+Delete the app. Recordings stay in `~/Movies/EcranArriere`. The language choice is stored in the app's preferences (`defaults delete local.ecran-arriere`).
+
+## Known limitations
+- Apple Silicon only (no Intel build yet).
+- No audio is captured.
+- When recording both screens, the second video starts about 2.5 s after the first.
+- The app is not notarized (hence the first-launch step above).
