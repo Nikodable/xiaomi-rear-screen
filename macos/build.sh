@@ -43,7 +43,8 @@ codesign --force --deep --sign - "$APP"   # signature ad hoc (pas de certificat 
 # archive : l'app + le README (installation + changelog)
 STAGE="$(mktemp -d)"
 cp -R "$APP" "$STAGE/"
-{ cat README.md; printf '\n---\n\n'; cat "$ROOT/CHANGELOG.md"; } > "$STAGE/README.md"
+{ sed 's#\.\./docs/overview\.png#overview.png#' README.md; printf '\n---\n\n'; cat "$ROOT/CHANGELOG.md"; } > "$STAGE/README.md"
+cp "$ROOT/docs/overview.png" "$STAGE/overview.png"
 rm -f "$ZIP"
 ditto -c -k --norsrc --noextattr --noacl "$STAGE" "$ZIP"
 rm -rf "$STAGE"

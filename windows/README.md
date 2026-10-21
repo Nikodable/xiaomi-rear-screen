@@ -5,7 +5,7 @@ A single `.exe`, with scrcpy and adb built in: nothing else to install.
 
 - **Requires:** Windows 11 (Mica background on 22H2 or newer) or Windows 10, 64-bit (x64; ARM PCs run it through emulation)
 - **Phone:** Android with USB debugging (built for a Xiaomi 18 Pro Max)
-- **Status:** version 1.0.0 was tested on a Windows PC and worked. The features added in 1.1.0 (languages, both screens) have so far been verified on macOS only — please report anything odd.
+- **Status:** version 1.0.0 was tested on a Windows PC and worked. The features added since (languages, both screens, HD ×2) have so far been verified on macOS only — please report anything odd.
 
 ---
 
@@ -30,6 +30,10 @@ A single `.exe`, with scrcpy and adb built in: nothing else to install.
 ### 3. Use it
 Open the app. The phone's name appears in the *Phone* menu and the status reads **Phone connected ✓**.
 
+![Annotated overview of the Rear Screen window](../docs/overview.png)
+
+*(Screenshot taken on macOS — the Windows window has the same layout.)*
+
 | Control | What it does |
 |---|---|
 | **Screen** menu | Front screen, rear screen, or **both screens** (default: rear) |
@@ -46,6 +50,16 @@ Files are saved in **`Videos\EcranArriere`**, named `ecran_<screen>_<date>_<time
 ### Showing both screens
 Choose **Both screens** in the *Screen* menu. Two windows open side by side, about 2.5 seconds apart. Recording produces two separate MP4 files.
 
+### HD ×2 (experimental)
+Tick **HD ×2** to double the rear screen's resolution (e.g. 976×596 → 1952×1192): text and widgets become sharper in the mirror, recordings and photos. The animated wallpaper does not gain detail.
+
+1. On the phone, turn on **USB debugging (Security settings)** in Developer options (a Xiaomi account sign-in may be required).
+2. Tick **HD ×2** — the *Screen* menu now shows the doubled resolution.
+3. Start the mirror, a recording or take a photo. The rear screen may flicker for a second while its service restarts.
+
+When everything stops, the phone is restored automatically. If a ×2 was ever left active (cable unplugged, crash), the app restores it the next time it sees the phone.
+Only the rear screen is affected; the front screen is never modified. Tested on a Xiaomi 18 Pro Max (HyperOS) — other phones may behave differently.
+
 ---
 
 ## Troubleshooting
@@ -54,8 +68,9 @@ Choose **Both screens** in the *Screen* menu. Two windows open side by side, abo
 |---|---|
 | *No phone detected* | Check the cable (must carry data), set USB mode to **File transfer**, install the USB driver (step 2.5), make sure USB debugging is on, then press **↻**. |
 | *Phone not authorized* | Unlock the phone and accept the USB debugging prompt (tick **Always allow**). |
+| *Security option required* (HD ×2) | Turn on **USB debugging (Security settings)** in the phone's Developer options, then try again. |
 | *Phone offline* | Unplug and replug the cable, or switch USB debugging off and on. |
-| Black video | The screen being captured is off — wake it up (the rear screen must be on). |
+| Black video | The screen being captured is off — wake it up (the rear screen must be on). With HD ×2, if the window stays black, close it and start the mirror again. |
 | Recording file is unreadable | Stop with the **Stop** button or by closing the mirror window, not by killing the app from Task Manager. |
 | App will not start | Make sure the zip was fully extracted (do not run the `.exe` from inside the zip). |
 
@@ -70,4 +85,4 @@ Delete `EcranArriere.exe`. To remove everything it created:
 - No audio is captured.
 - When recording both screens, the second video starts about 2.5 s after the first.
 - The app is not code-signed (hence the SmartScreen step above).
-- The 1.1.0 additions (languages, both screens) are not yet validated on Windows hardware.
+- The additions since 1.0.0 (languages, both screens, HD ×2) are not yet validated on Windows hardware.

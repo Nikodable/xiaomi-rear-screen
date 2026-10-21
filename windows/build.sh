@@ -20,9 +20,10 @@ dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true 
 (
   cd dist
   rm -f ./*.pdb
-  { cat ../README.md; printf '\n---\n\n'; cat "$ROOT/CHANGELOG.md"; } > README.md
+  { sed 's#\.\./docs/overview\.png#overview.png#' ../README.md; printf '\n---\n\n'; cat "$ROOT/CHANGELOG.md"; } > README.md
+  cp "$ROOT/docs/overview.png" overview.png
   cp "$ROOT/NOTICE" NOTICE.txt
-  zip -q "$ZIP" EcranArriere.exe README.md NOTICE.txt
+  zip -q "$ZIP" EcranArriere.exe README.md NOTICE.txt overview.png
 )
 ls -lh "dist/$ZIP"
 # Sous Windows (PowerShell), une fois third_party/scrcpy-win64-v4.1.zip en place :

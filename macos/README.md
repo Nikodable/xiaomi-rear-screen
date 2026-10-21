@@ -27,6 +27,8 @@ Everything needed (scrcpy + adb) is built in: nothing else to install.
 ### 3. Use it
 Open the app. The phone's name appears in the *Phone* menu and the status reads **Phone connected ✓**.
 
+![Annotated overview of the Rear Screen window](../docs/overview.png)
+
 | Control | What it does |
 |---|---|
 | **Screen** menu | Front screen, rear screen, or **both screens** (default: rear) |
@@ -46,6 +48,16 @@ Choose **Both screens** in the *Screen* menu. Two windows open side by side, abo
 > **Stage Manager:** macOS shows only one app at a time on stage, so one mirror may sit as a thumbnail on the left.
 > Drag that thumbnail onto the stage, or Shift-click it, to see both. Turning Stage Manager off also works.
 
+### HD ×2 (experimental)
+Tick **HD ×2** to double the rear screen's resolution (e.g. 976×596 → 1952×1192): text and widgets become sharper in the mirror, recordings and photos. The animated wallpaper does not gain detail.
+
+1. On the phone, turn on **USB debugging (Security settings)** in Developer options (a Xiaomi account sign-in may be required).
+2. Tick **HD ×2** — the *Screen* menu now shows the doubled resolution.
+3. Start the mirror, a recording or take a photo. The rear screen may flicker for a second while its service restarts.
+
+When everything stops, the phone is restored automatically. If a ×2 was ever left active (cable unplugged, crash), the app restores it the next time it sees the phone.
+Only the rear screen is affected; the front screen is never modified. Tested on a Xiaomi 18 Pro Max (HyperOS) — other phones may behave differently.
+
 ---
 
 ## Troubleshooting
@@ -54,8 +66,9 @@ Choose **Both screens** in the *Screen* menu. Two windows open side by side, abo
 |---|---|
 | *No phone detected* | Check the cable (must carry data), set USB mode to **File transfer**, make sure USB debugging is on, then press **↻**. |
 | *Phone not authorized* | Unlock the phone and accept the USB debugging prompt (tick **Always allow**). |
+| *Security option required* (HD ×2) | Turn on **USB debugging (Security settings)** in the phone's Developer options, then try again. |
 | *Phone offline* | Unplug and replug the cable, or switch USB debugging off and on. |
-| Black video | The screen being captured is off — wake it up (the rear screen must be on). |
+| Black video | The screen being captured is off — wake it up (the rear screen must be on). With HD ×2, if the window stays black, close it and start the mirror again. |
 | Recording file is unreadable | Always stop with the **Stop** button or by closing the app window, not by force-quitting. |
 
 ## Uninstall
