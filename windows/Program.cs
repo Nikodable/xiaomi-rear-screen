@@ -216,13 +216,23 @@ static class Q
         Quality.Normal => I18N.T("quality.normal"),
         _ => I18N.T("quality.max"),
     };
-    public static string[] Args(Quality q) => q switch
+    /// Réglages scrcpy ; en HD ×2 l'image a 4× plus de pixels, on monte donc le débit.
+    public static string[] Args(Quality q, bool upscaled = false) => q switch
     {
-        Quality.Light => new[] { "--video-bit-rate=4M", "--max-fps=30" },
-        Quality.Normal => new[] { "--video-bit-rate=8M", "--max-fps=60" },
-        _ => new[] { "--video-bit-rate=20M", "--max-fps=120" },
+        Quality.Light => new[] { upscaled ? "--video-bit-rate=8M" : "--video-bit-rate=4M", "--max-fps=30" },
+        Quality.Normal => new[] { upscaled ? "--video-bit-rate=16M" : "--video-bit-rate=8M", "--max-fps=60" },
+        _ => new[] { upscaled ? "--video-bit-rate=24M" : "--video-bit-rate=20M", "--max-fps=120" },
     };
 }
+
+record DisplayMode(int W, int H, int Dpi, int? OvW, int? OvH, int? OvDpi)
+{
+    public bool IsDoubled => OvW == 2 * W && OvH == 2 * H && OvDpi == 2 * Dpi;   // signature exacte du HD ×2
+    public bool HasOverride => OvW != null || OvH != null || OvDpi != null;
+}
+
+enum UpscaleKind { Ok, NeedsSecurity, Custom, Failed }
+record UpscaleResult(UpscaleKind Kind, string Message = "");
 
 static class Adb
 {
@@ -253,6 +263,63 @@ static class Adb
     }
 
     /// Écrans physiques du téléphone, nommés (avant / arrière / principal). Les écrans virtuels sont ignorés.
+    // ── HD ×2 (expérimental) : double la définition de l'écran arrière côté téléphone (wm size / wm density) ──
+
+    public static DisplayMode? ReadDisplayMode(string serial, string id)
+    {
+        var size = Proc.Run(Tools.Adb, "-s", serial, "shell", "wm", "size", "-d", id).Text;
+        var dens = Proc.Run(Tools.Adb, "-s", serial, "shell", "wm", "density", "-d", id).Text;
+        var ps = Regex.Match(size, @"Physical size:\s*(\d+)x(\d+)");
+        var pd = Regex.Match(dens, @"Physical density:\s*(\d+)");
+        if (!ps.Success || !pd.Success) return null;
+        var os = Regex.Match(size, @"Override size:\s*(\d+)x(\d+)");
+        var od = Regex.Match(dens, @"Override density:\s*(\d+)");
+        return new DisplayMode(int.Parse(ps.Groups[1].Value), int.Parse(ps.Groups[2].Value), int.Parse(pd.Groups[1].Value),
+            os.Success ? int.Parse(os.Groups[1].Value) : null, os.Success ? int.Parse(os.Groups[2].Value) : null,
+            od.Success ? int.Parse(od.Groups[1].Value) : null);
+    }
+
+    /// Services Xiaomi de l'écran arrière (ex. com.xiaomi.subscreencenter). On ne relance QUE ceux-là, jamais SystemUI ni une app au hasard.
+    static List<string> RearServicePackages(string serial) =>
+        Proc.Run(Tools.Adb, "-s", serial, "shell", "pm", "list", "packages").Text.Split('\n')
+            .Select(l => l.Replace("package:", "").Trim())
+            .Where(p => Regex.IsMatch(p, "subscreen|backscreen|rearscreen", RegexOptions.IgnoreCase)).ToList();
+
+    /// Sans ce redémarrage, le widget de l'écran arrière reste figé à l'ancienne taille (cache de mise en page).
+    static void RestartRearService(string serial)
+    {
+        foreach (var pkg in RearServicePackages(serial)) Proc.Run(Tools.Adb, "-s", serial, "shell", "am", "force-stop", pkg);
+    }
+
+    public static UpscaleResult EnableUpscale(string serial, DisplayInfo d)
+    {
+        var m = ReadDisplayMode(serial, d.Id);
+        if (m == null) return new(UpscaleKind.Failed, "wm size");
+        if (m.IsDoubled) return new(UpscaleKind.Ok);
+        if (m.HasOverride) return new(UpscaleKind.Custom);   // réglage perso de l'utilisateur : on n'y touche pas
+        static bool Denied(string t) => t.Contains("SecurityException") || t.Contains("WRITE_SECURE_SETTINGS");
+        static string Clean(string t) { t = t.Trim(); return t.Length > 160 ? t[..160] : t; }
+        var r1 = Proc.Run(Tools.Adb, "-s", serial, "shell", "wm", "size", $"{2 * m.W}x{2 * m.H}", "-d", d.Id).Text;
+        if (Denied(r1)) return new(UpscaleKind.NeedsSecurity);
+        if (r1.Contains("Exception")) return new(UpscaleKind.Failed, Clean(r1));
+        var r2 = Proc.Run(Tools.Adb, "-s", serial, "shell", "wm", "density", $"{2 * m.Dpi}", "-d", d.Id).Text;
+        if (Denied(r2) || r2.Contains("Exception"))
+        {
+            Proc.Run(Tools.Adb, "-s", serial, "shell", "wm", "size", "reset", "-d", d.Id);
+            return Denied(r2) ? new(UpscaleKind.NeedsSecurity) : new(UpscaleKind.Failed, Clean(r2));
+        }
+        RestartRearService(serial);
+        Thread.Sleep(2500);
+        return new(UpscaleKind.Ok);
+    }
+
+    public static void ResetUpscale(string serial, string id)
+    {
+        Proc.Run(Tools.Adb, "-s", serial, "shell", "wm", "size", "reset", "-d", id);
+        Proc.Run(Tools.Adb, "-s", serial, "shell", "wm", "density", "reset", "-d", id);
+        RestartRearService(serial);
+    }
+
     public static List<DisplayInfo> Displays(string serial)
     {
         var listing = Proc.Run(Tools.Scrcpy, "-s", serial, "--list-displays").Text;
@@ -304,6 +371,10 @@ class MainWindow : Window
     string? displaysSerial, pendingSelect;
     bool refreshing, suppress, showWhileRecording = true;
     List<Process> mirrors = new(), records = new();
+    CheckBox upscaleCheck = new();
+    bool upscaleWanted, upscaleBusy, photoBusy;
+    (string Serial, string DisplayId)? upscaleSession;   // HD ×2 appliqué (ou en cours) par l'app
+    int launchPending;                                    // lancements programmés, pas encore exécutés
     DateTime recStart;
     List<string> recFiles = new();
 
@@ -343,7 +414,11 @@ class MainWindow : Window
             r.Tick += (_, _) => Refresh();
             r.Start();
         };
-        Closing += (_, _) => { mirrors.ForEach(Proc.Stop); records.ForEach(Proc.Stop); };
+        Closing += (_, _) =>
+        {
+            mirrors.ForEach(Proc.Stop); records.ForEach(Proc.Stop);
+            if (upscaleSession is { } s) Adb.ResetUpscale(s.Serial, s.DisplayId);   // jamais laisser le téléphone en ×2
+        };
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -437,6 +512,12 @@ class MainWindow : Window
         timerLabel = new TextBlock { HorizontalAlignment = HorizontalAlignment.Center, FontFamily = new FontFamily("Consolas"), FontSize = 15, Visibility = Visibility.Collapsed };
         viewCheck = new CheckBox { Content = I18N.T("rec.viewCheck"), IsChecked = showWhileRecording };
         viewCheck.Click += (_, _) => showWhileRecording = viewCheck.IsChecked == true;
+        upscaleCheck = new CheckBox { Content = I18N.T("upscale.check"), IsChecked = upscaleWanted, ToolTip = I18N.T("upscale.tip"), IsEnabled = displays.Any(d => d.Role == Role.Rear) };
+        upscaleCheck.Click += (_, _) =>
+        {
+            upscaleWanted = upscaleCheck.IsChecked == true;
+            FillDisplays(SelectedTargets.Select(d => d.Id).ToList());   // la résolution affichée suit la case
+        };
 
         foreach (var q in Enum.GetValues<Quality>()) qualityPopup.Items.Add(Q.Title(q));
         qualityPopup.SelectedIndex = (int)Quality.Normal;
@@ -466,7 +547,7 @@ class MainWindow : Window
         titleRow.Children.Add(langPopup);
 
         var cardA = Card(status, Row(I18N.T("label.phone"), devicePopup, refreshBtn), Row(I18N.T("label.display"), displayPopup), Row(I18N.T("label.quality"), qualityPopup));
-        var cardB = Card(mirrorBtn, recBtn, viewCheck, timerLabel, TwoCols(photoBtn, folder));
+        var cardB = Card(mirrorBtn, recBtn, viewCheck, upscaleCheck, timerLabel, TwoCols(photoBtn, folder));
         var cardC = Card(TwoCols(wifi, manual));
 
         var root = new StackPanel { Margin = new Thickness(16, 12, 16, 4) };
@@ -506,6 +587,7 @@ class MainWindow : Window
             var knownSerial = displaysSerial;
             var knownDisplays = displays.ToList();
             var knownNames = new Dictionary<string, string>(phoneNames);
+            var upActive = upscaleSession != null || upscaleBusy;
 
             var r = await Task.Run(() =>
             {
@@ -520,17 +602,27 @@ class MainWindow : Window
                              ?? list.FirstOrDefault(p => p.State == "device") ?? list.FirstOrDefault();
                 var found = knownDisplays;
                 var serial = knownSerial;
+                var healed = false;
                 if (chosen is { State: "device" } && (chosen.Serial != knownSerial || knownDisplays.Count == 0))
                 {
                     found = Adb.Displays(chosen.Serial);
                     serial = found.Count == 0 ? null : chosen.Serial;
+                    // Un HD ×2 laissé actif (câble débranché, plantage) est remis à la normale — seulement s'il porte notre signature exacte
+                    if (!upActive && found.FirstOrDefault(d => d.Role == Role.Rear) is { } rear
+                        && Adb.ReadDisplayMode(chosen.Serial, rear.Id) is { IsDoubled: true })
+                    {
+                        Adb.ResetUpscale(chosen.Serial, rear.Id);
+                        healed = true;
+                        found = Adb.Displays(chosen.Serial);   // tailles relues après la remise à la normale
+                    }
                 }
                 else if (chosen?.State != "device") { found = new(); serial = null; }
-                return (list, names, chosen, found, serial);
+                return (list, names, chosen, found, serial, healed);
             });
 
             foreach (var kv in r.names) phoneNames[kv.Key] = kv.Value;
             Apply(r.list, r.chosen, r.found, r.serial);
+            if (r.healed) status.Text = I18N.T("upscale.healed");
         }
         catch { /* on réessaiera au prochain tour */ }
         finally { refreshing = false; }
@@ -552,6 +644,7 @@ class MainWindow : Window
         displaysSerial = serial;
         var displaysChanged = !found.Select(d => d.Id).SequenceEqual(displays.Select(d => d.Id)) || displayPopup.Items.Count == 0;
         displays = found;
+        upscaleCheck.IsEnabled = found.Any(d => d.Role == Role.Rear);
         if (displaysChanged) FillDisplays(null);
         suppress = false;
         UpdateStatus();
@@ -581,7 +674,7 @@ class MainWindow : Window
         foreach (var d in displays)
         {
             targets.Add(new() { d });
-            displayPopup.Items.Add($"{d.Name} ({d.Size})");
+            displayPopup.Items.Add($"{d.Name} ({SizeLabel(d)})");
         }
         if (displays.Count >= 2)
         {
@@ -592,6 +685,14 @@ class MainWindow : Window
         var i = previous == null ? -1 : targets.FindIndex(t => t.Select(d => d.Id).SequenceEqual(previous));
         if (i < 0) i = targets.FindIndex(t => t.Count == 1 && t[0].Role == Role.Rear);
         displayPopup.SelectedIndex = Math.Max(0, i);
+    }
+
+    /// Résolution affichée dans le menu « Écran » : doublée pour l'écran arrière quand HD ×2 est coché.
+    string SizeLabel(DisplayInfo d)
+    {
+        if (!upscaleWanted || d.Role != Role.Rear) return d.Size;
+        var dims = d.Size.Split('x');
+        return dims.Length == 2 && int.TryParse(dims[0], out var w) && int.TryParse(dims[1], out var h) ? $"{w * 2}x{h * 2}" : d.Size;
     }
 
     void UpdateStatus()
@@ -639,11 +740,17 @@ class MainWindow : Window
         return res;
     }
 
-    List<string> Args(Phone p, DisplayInfo d, (int X, int W, int H)? slot)
+    List<string> Args(Phone p, DisplayInfo d, (int X, int W, int H)? slot, bool upscaled = false)
     {
         var a = new List<string> { "-s", p.Serial, $"--display-id={d.Id}", "--no-audio", $"--window-title={d.Name}" };
-        a.AddRange(Q.Args(SelectedQuality));
+        a.AddRange(Q.Args(SelectedQuality, upscaled));
         if (slot is { } s) a.AddRange(new[] { $"--window-x={s.X}", "--window-y=60", $"--window-width={s.W}", $"--window-height={s.H}" });
+        else if (upscaled)
+        {
+            // fenêtre à la taille physique ; la vidéo ×2 y est réduite avec un bon filtre
+            var dims = d.Size.Split('x');
+            if (dims.Length == 2) a.AddRange(new[] { $"--window-width={dims[0]}", $"--window-height={dims[1]}" });
+        }
         return a;
     }
 
@@ -654,16 +761,61 @@ class MainWindow : Window
     async void LaunchStaggered(List<List<string>> argsList, Action<Process> onStart)
     {
         var gen = ++launchGen;
-        for (int i = 0; i < argsList.Count; i++)
+        launchPending += argsList.Count;
+        var done = 0;
+        try
         {
-            if (i > 0) await Task.Delay(2500);
-            if (gen != launchGen) return;
-            var proc = Proc.Spawn(argsList[i]);
-            if (proc != null) onStart(proc);
+            for (int i = 0; i < argsList.Count; i++)
+            {
+                if (i > 0) await Task.Delay(2500);
+                if (gen != launchGen) return;
+                launchPending--; done++;
+                var proc = Proc.Spawn(argsList[i]);
+                if (proc != null) onStart(proc);
+            }
+        }
+        finally { launchPending -= argsList.Count - done; }
+    }
+
+    /// Applique le HD ×2 à l'écran arrière si la case est cochée ; retourne les écrans concernés.
+    async Task<HashSet<string>> PrepareUpscale(Phone p, List<DisplayInfo> ts)
+    {
+        var none = new HashSet<string>();
+        if (upscaleCheck.IsChecked != true || ts.FirstOrDefault(d => d.Role == Role.Rear) is not { } rear) return none;
+        // pas de changement de résolution sous un flux déjà en cours
+        if (upscaleSession == null && (Any(mirrors) || Any(records))) return none;
+        upscaleBusy = true;
+        status.Text = I18N.T("upscale.enabling");
+        UpscaleResult r;
+        try { r = await Task.Run(() => Adb.EnableUpscale(p.Serial, rear)); }
+        finally { upscaleBusy = false; }
+        switch (r.Kind)
+        {
+            case UpscaleKind.Ok:
+                upscaleSession = (p.Serial, rear.Id);
+                return new() { rear.Id };
+            case UpscaleKind.NeedsSecurity:
+                MessageBox.Show(I18N.T("upscale.needSecurity.info"), I18N.T("upscale.needSecurity.title"), MessageBoxButton.OK, MessageBoxImage.Information);
+                return none;
+            case UpscaleKind.Custom:
+                status.Text = I18N.T("upscale.custom");
+                return none;
+            default:
+                status.Text = I18N.T("upscale.failed", r.Message);
+                return none;
         }
     }
 
-    void ToggleMirror()
+    /// Remet l'écran arrière à la normale quand plus rien ne l'utilise.
+    void EndUpscaleIfIdle()
+    {
+        if (upscaleSession is not { } s || upscaleBusy || photoBusy || launchPending > 0 || Any(mirrors) || Any(records)) return;
+        upscaleBusy = true;
+        Task.Run(() => Adb.ResetUpscale(s.Serial, s.DisplayId))
+            .ContinueWith(_ => Dispatcher.Invoke(() => { upscaleSession = null; upscaleBusy = false; }));
+    }
+
+    async void ToggleMirror()
     {
         if (Any(mirrors)) { launchGen++; var ps = mirrors.ToList(); Task.Run(() => ps.ForEach(Proc.Stop)); return; }
         if (Any(records))
@@ -672,14 +824,15 @@ class MainWindow : Window
             return;
         }
         var p = ReadyPhone();
-        if (p == null) return;
+        if (p == null || upscaleBusy || photoBusy) return;
         var ts = SelectedTargets;
-        var slots = WindowLayout(ts);
         mirrors = new();
-        LaunchStaggered(ts.Select((d, i) => Args(p, d, slots[i])).ToList(), proc => mirrors.Add(proc));
+        var up = await PrepareUpscale(p, ts);
+        var slots = WindowLayout(ts);
+        LaunchStaggered(ts.Select((d, i) => Args(p, d, slots[i], up.Contains(d.Id))).ToList(), proc => mirrors.Add(proc));
     }
 
-    void ToggleRecord()
+    async void ToggleRecord()
     {
         if (Any(records))
         {
@@ -690,25 +843,24 @@ class MainWindow : Window
             return;
         }
         var p = ReadyPhone();
-        if (p == null) return;
+        if (p == null || upscaleBusy || photoBusy) return;
         launchGen++;
         mirrors.ForEach(Proc.Stop);
         Directory.CreateDirectory(OutDir);
         var ts = SelectedTargets;
-        var slots = WindowLayout(ts);
         var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        recFiles = new();
+        recFiles = ts.Select(d => Path.Combine(OutDir, $"ecran_{d.Slug}_{stamp}.mp4")).ToList();
+        records = new();
+        var up = await PrepareUpscale(p, ts);
+        var slots = WindowLayout(ts);
         var jobs = new List<List<string>>();
         for (int i = 0; i < ts.Count; i++)
         {
-            var file = Path.Combine(OutDir, $"ecran_{ts[i].Slug}_{stamp}.mp4");
-            recFiles.Add(file);
-            var a = Args(p, ts[i], slots[i]);
-            a.Add("--record=" + file);
+            var a = Args(p, ts[i], slots[i], up.Contains(ts[i].Id));
+            a.Add("--record=" + recFiles[i]);
             if (!showWhileRecording) a.Add("--no-playback");
             jobs.Add(a);
         }
-        records = new();
         recStart = DateTime.Now;
         LaunchStaggered(jobs, proc => records.Add(proc));
     }
@@ -718,34 +870,41 @@ class MainWindow : Window
     async void TakePhoto()
     {
         var p = ReadyPhone();
-        if (p == null) return;
+        if (p == null || upscaleBusy || photoBusy) return;
         var ts = SelectedTargets;
         var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        photoBusy = true;
         status.Text = I18N.T("photo.capturing");
-        var msg = await Task.Run(() =>
+        try
         {
-            Directory.CreateDirectory(OutDir);
-            var saved = new List<string>();
-            foreach (var d in ts)
+            await PrepareUpscale(p, ts);
+            await Task.Delay(500);
+            var msg = await Task.Run(() =>
             {
-                var args = new List<string> { "-s", p.Serial, "exec-out", "screencap", "-p" };
-                if (d.Id != "0")
+                Directory.CreateDirectory(OutDir);
+                var saved = new List<string>();
+                foreach (var d in ts)
                 {
-                    if (d.LocalId == null) return I18N.T("photo.noId", d.Id);
-                    args.AddRange(new[] { "-d", d.LocalId });
+                    var args = new List<string> { "-s", p.Serial, "exec-out", "screencap", "-p" };
+                    if (d.Id != "0")
+                    {
+                        if (d.LocalId == null) return I18N.T("photo.noId", d.Id);
+                        args.AddRange(new[] { "-d", d.LocalId });
+                    }
+                    var data = Proc.Run(Tools.Adb, args.ToArray()).Data;
+                    if (data.Length < 8 || data[0] != 0x89 || data[1] != 0x50 || data[2] != 0x4E || data[3] != 0x47)
+                        return I18N.T("photo.noImage");
+                    var file = Path.Combine(OutDir, $"ecran_{d.Slug}_{stamp}.png");
+                    try { File.WriteAllBytes(file, data); saved.Add(file); }
+                    catch { return I18N.T("photo.writeFail"); }
                 }
-                var data = Proc.Run(Tools.Adb, args.ToArray()).Data;
-                if (data.Length < 8 || data[0] != 0x89 || data[1] != 0x50 || data[2] != 0x4E || data[3] != 0x47)
-                    return I18N.T("photo.noImage");
-                var file = Path.Combine(OutDir, $"ecran_{d.Slug}_{stamp}.png");
-                try { File.WriteAllBytes(file, data); saved.Add(file); }
-                catch { return I18N.T("photo.writeFail"); }
-            }
-            if (saved.Count > 0)
-                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{saved[0]}\"") { UseShellExecute = true });
-            return I18N.T("photo.done", string.Join(", ", saved.Select(Path.GetFileName)));
-        });
-        status.Text = msg;
+                if (saved.Count > 0)
+                    Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{saved[0]}\"") { UseShellExecute = true });
+                return I18N.T("photo.done", string.Join(", ", saved.Select(Path.GetFileName)));
+            });
+            status.Text = msg;
+        }
+        finally { photoBusy = false; }
     }
 
     void OpenFolder()
@@ -814,6 +973,7 @@ class MainWindow : Window
 
     void Tick()
     {
+        EndUpscaleIfIdle();
         mirrorBtn.Content = Any(mirrors) ? I18N.T("mirror.stop") : I18N.T("mirror.start");
         if (Any(records))
         {

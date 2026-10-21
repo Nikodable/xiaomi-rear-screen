@@ -3,6 +3,23 @@
 All notable changes. Format based on [Keep a Changelog](https://keepachangelog.com/); versions follow [SemVer](https://semver.org/).
 The macOS and Windows apps share one version number.
 
+## [1.2.0] — 2026-10-21
+### Added
+- **HD ×2 (experimental)** option for the rear screen: doubles its resolution on the phone (`wm size` / `wm density`), so text and widgets are sharper in the mirror, recordings and photos (e.g. 976×596 → 1952×1192). Off by default.
+  - Requires **USB debugging (Security settings)** on the phone; a clear message (in six languages) explains it if missing.
+  - Only the Xiaomi rear-screen service (`*subscreen*` package) is restarted — never SystemUI or other apps — so the widgets re-layout correctly.
+  - The phone is restored automatically when the mirror/recording stops, when the app quits, and **at the next launch** if a ×2 was left active (cable unplugged, crash). A custom display setting made by the user is never touched.
+  - The *Screen* menu shows the doubled resolution as soon as the box is ticked; the bitrate is raised automatically while HD ×2 is active.
+  - Tested on a Xiaomi 18 Pro Max (HyperOS). Gain is visible on text/widgets, not on the animated wallpaper.
+- Annotated quick-tour illustration in the READMEs (and inside the downloadable archives).
+
+### Fixed
+- *macOS:* timers were slowed down by App Nap while the mirror window was in front, which delayed the automatic restore by about 10 s (now ~1 s).
+
+### Notes
+- *Windows:* the HD ×2 option is compiled and ported from the macOS code but has **not been tested on a Windows PC** yet.
+- *macOS:* in one early test the first HD ×2 mirror window stayed black until it was restarted; this could not be reproduced afterwards.
+
 ## [1.1.0] — 2026-10-16
 ### Added
 - Screens now have proper names (*Front screen*, *Rear screen*, *Main screen*); virtual displays are hidden.

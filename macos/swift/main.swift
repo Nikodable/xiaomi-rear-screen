@@ -142,6 +142,66 @@ func loadDisplays(_ serial: String) -> [DisplayInfo] {
     }
 }
 
+// MARK: HD ×2 (expérimental) — double la définition de l'écran arrière côté téléphone (wm size / wm density)
+
+struct DisplayMode {
+    let w: Int, h: Int, dpi: Int           // valeurs physiques
+    let ovW: Int?, ovH: Int?, ovDpi: Int?  // réglages forcés éventuels
+    var isDoubled: Bool { ovW == 2 * w && ovH == 2 * h && ovDpi == 2 * dpi }   // signature exacte du HD ×2
+    var hasOverride: Bool { ovW != nil || ovH != nil || ovDpi != nil }
+}
+
+func readDisplayMode(_ serial: String, _ id: String) -> DisplayMode? {
+    let size = run(adbPath, ["-s", serial, "shell", "wm", "size", "-d", id]).text
+    let dens = run(adbPath, ["-s", serial, "shell", "wm", "density", "-d", id]).text
+    guard let ps = matches("Physical size:\\s*(\\d+)x(\\d+)", in: size).first,
+          let pd = matches("Physical density:\\s*(\\d+)", in: dens).first,
+          let w = Int(ps[0]), let h = Int(ps[1]), let dpi = Int(pd[0]) else { return nil }
+    let os = matches("Override size:\\s*(\\d+)x(\\d+)", in: size).first
+    let od = matches("Override density:\\s*(\\d+)", in: dens).first
+    return DisplayMode(w: w, h: h, dpi: dpi, ovW: os.flatMap { Int($0[0]) }, ovH: os.flatMap { Int($0[1]) }, ovDpi: od.flatMap { Int($0[0]) })
+}
+
+/// Services Xiaomi de l'écran arrière (ex. com.xiaomi.subscreencenter). On ne relance QUE ceux-là, jamais SystemUI ni une app au hasard.
+func rearServicePackages(_ serial: String) -> [String] {
+    run(adbPath, ["-s", serial, "shell", "pm", "list", "packages"]).text
+        .split(separator: "\n")
+        .map { $0.replacingOccurrences(of: "package:", with: "").trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { $0.range(of: "subscreen|backscreen|rearscreen", options: [.regularExpression, .caseInsensitive]) != nil }
+}
+
+/// Sans ce redémarrage, le widget de l'écran arrière reste figé à l'ancienne taille (cache de mise en page).
+func restartRearService(_ serial: String) {
+    for pkg in rearServicePackages(serial) { run(adbPath, ["-s", serial, "shell", "am", "force-stop", pkg]) }
+}
+
+enum UpscaleResult { case ok, needsSecurity, custom, failed(String) }
+
+func enableUpscale(_ serial: String, _ d: DisplayInfo) -> UpscaleResult {
+    guard let m = readDisplayMode(serial, d.id) else { return .failed("wm size") }
+    if m.isDoubled { return .ok }
+    if m.hasOverride { return .custom }          // réglage perso de l'utilisateur : on n'y touche pas
+    func denied(_ t: String) -> Bool { t.contains("SecurityException") || t.contains("WRITE_SECURE_SETTINGS") }
+    func clean(_ t: String) -> String { String(t.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160)) }
+    let r1 = run(adbPath, ["-s", serial, "shell", "wm", "size", "\(2 * m.w)x\(2 * m.h)", "-d", d.id]).text
+    if denied(r1) { return .needsSecurity }
+    if r1.contains("Exception") { return .failed(clean(r1)) }
+    let r2 = run(adbPath, ["-s", serial, "shell", "wm", "density", "\(2 * m.dpi)", "-d", d.id]).text
+    if denied(r2) || r2.contains("Exception") {
+        run(adbPath, ["-s", serial, "shell", "wm", "size", "reset", "-d", d.id])
+        return denied(r2) ? .needsSecurity : .failed(clean(r2))
+    }
+    restartRearService(serial)
+    Thread.sleep(forTimeInterval: 2.5)
+    return .ok
+}
+
+func resetUpscale(_ serial: String, _ id: String) {
+    run(adbPath, ["-s", serial, "shell", "wm", "size", "reset", "-d", id])
+    run(adbPath, ["-s", serial, "shell", "wm", "density", "reset", "-d", id])
+    restartRearService(serial)
+}
+
 enum Quality: Int, CaseIterable {
     case light, normal, max
     var title: String {
@@ -151,11 +211,12 @@ enum Quality: Int, CaseIterable {
         case .max: return t("quality.max")
         }
     }
-    var args: [String] {
+    /// Réglages scrcpy ; en HD ×2 l'image a 4× plus de pixels, on monte donc le débit.
+    func args(upscaled: Bool = false) -> [String] {
         switch self {
-        case .light: return ["--video-bit-rate=4M", "--max-fps=30"]
-        case .normal: return ["--video-bit-rate=8M", "--max-fps=60"]
-        case .max: return ["--video-bit-rate=20M", "--max-fps=120"]
+        case .light: return [upscaled ? "--video-bit-rate=8M" : "--video-bit-rate=4M", "--max-fps=30"]
+        case .normal: return [upscaled ? "--video-bit-rate=16M" : "--video-bit-rate=8M", "--max-fps=60"]
+        case .max: return [upscaled ? "--video-bit-rate=24M" : "--video-bit-rate=20M", "--max-fps=120"]
         }
     }
 }
@@ -188,6 +249,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var phoneNames: [String: String] = [:]
     var showWhileRecording = true
     var launchGen = 0   // annule les lancements en attente quand on arrête
+    var launchPending = 0   // lancements programmés, pas encore exécutés
+    var upscaleCheck = NSButton()
+    var upscaleWanted = false
+    var upscaleSession: (serial: String, displayId: String)?   // HD ×2 appliqué (ou en cours) par l'app
+    var upscaleBusy = false
+    var photoBusy = false
+    var activity: NSObjectProtocol?
 
     var selectedPhone: Phone? {
         let i = devicePopup.indexOfSelectedItem
@@ -200,6 +268,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var quality: Quality { Quality(rawValue: qualityPopup.indexOfSelectedItem) ?? .normal }
 
     func applicationDidFinishLaunching(_ n: Notification) {
+        // Empêche App Nap de ralentir les minuteries quand l'app est derrière la fenêtre de miroir (remise à zéro du HD ×2, détection, chrono)
+        activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated], reason: "Rear Screen: miroir / enregistrement")
         buildMenu()
         buildWindow()
         refresh()
@@ -278,6 +348,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         timerLabel = NSTextField(labelWithString: " ")
 
         viewCheck.state = showWhileRecording ? .on : .off
+        upscaleCheck = NSButton(checkboxWithTitle: t("upscale.check"), target: self, action: #selector(upscaleCheckChanged))
+        upscaleCheck.state = upscaleWanted ? .on : .off
+        upscaleCheck.toolTip = t("upscale.tip")
+        upscaleCheck.isEnabled = displays.contains { $0.role == .rear }
         timerLabel.font = NSFont.monospacedSystemFont(ofSize: 14, weight: .medium)
         timerLabel.alignment = .center
         timerLabel.isHidden = true
@@ -320,11 +394,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                           labeled(t("label.phone"), devicePopup, extra: refreshBtn),
                           labeled(t("label.display"), displayPopup),
                           labeled(t("label.quality"), qualityPopup)])
-        let cardB = card([mirrorBtn, recBtn, viewCheck, timerLabel, photoRow])
+        let cardB = card([mirrorBtn, recBtn, viewCheck, upscaleCheck, timerLabel, photoRow])
         let cardC = card([wifiRow])
 
         for p in [devicePopup, displayPopup, qualityPopup] {
-            p.widthAnchor.constraint(equalToConstant: 200).isActive = true
+            p.widthAnchor.constraint(equalToConstant: 224).isActive = true
         }
 
         let stack = NSStackView(views: [titleRow, cardA, cardB, cardC])
@@ -367,6 +441,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func setStatus(_ s: String) { DispatchQueue.main.async { self.status.stringValue = s } }
 
     @objc func viewCheckChanged() { showWhileRecording = viewCheck.state == .on }
+    @objc func upscaleCheckChanged() {
+        upscaleWanted = upscaleCheck.state == .on
+        fillDisplays(keep: selectedTargets.map(\.id))   // la résolution affichée suit la case
+    }
+
+    /// Résolution affichée dans le menu « Écran » : doublée pour l'écran arrière quand HD ×2 est coché.
+    func sizeLabel(_ d: DisplayInfo) -> String {
+        guard upscaleWanted, d.role == .rear else { return d.size }
+        let dims = d.size.split(separator: "x").compactMap { Int($0) }
+        return dims.count == 2 ? "\(dims[0] * 2)x\(dims[1] * 2)" : d.size
+    }
 
     @objc func langChanged() {
         guard let l = Lang.allCases[safe: langPopup.indexOfSelectedItem] else { return }
@@ -394,7 +479,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let knownSerial = displaysSerial
         let knownDisplays = displays
         let knownNames = phoneNames
+        let upActive = upscaleSession != nil || upscaleBusy
         DispatchQueue.global().async {
+            var healed = false
             var list = parseDevices(run(adbPath, ["devices", "-l"]).text)
             var names = knownNames
             for i in list.indices where list[i].state == "device" {
@@ -409,6 +496,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             if let c = chosen, c.state == "device", c.serial != knownSerial || knownDisplays.isEmpty {
                 found = loadDisplays(c.serial)
                 serial = found.isEmpty ? nil : c.serial
+                // Un HD ×2 laissé actif (câble débranché, plantage) est remis à la normale — seulement s'il porte notre signature exacte
+                if !upActive, let rear = found.first(where: { $0.role == .rear }),
+                   let m = readDisplayMode(c.serial, rear.id), m.isDoubled {
+                    resetUpscale(c.serial, rear.id); healed = true
+                    found = loadDisplays(c.serial)   // tailles relues après la remise à la normale
+                }
             } else if chosen?.state != "device" {
                 found = []; serial = nil
             }
@@ -416,6 +509,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 self.refreshing = false
                 self.phoneNames = names
                 self.apply(list, chosen: chosen, displays: found, serial: serial)
+                if healed { self.status.stringValue = t("upscale.healed") }
             }
         }
     }
@@ -430,6 +524,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         displaysSerial = serial
         let displaysChanged = found.map(\.id) != displays.map(\.id) || displayPopup.numberOfItems == 0
         displays = found
+        upscaleCheck.isEnabled = found.contains { $0.role == .rear }
         if displaysChanged { fillDisplays(keep: nil) }
         updateStatus()
     }
@@ -452,7 +547,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         for d in displays {
             targets.append([d])
-            displayPopup.addItem(withTitle: "\(d.name) (\(d.size))")
+            displayPopup.addItem(withTitle: "\(d.name) (\(sizeLabel(d)))")
         }
         if displays.count >= 2 {
             targets.append(displays)
@@ -504,10 +599,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    func args(_ p: Phone, _ d: DisplayInfo, slot: (x: Int, w: Int, h: Int)?) -> [String] {
-        var a = ["-s", p.serial, "--display-id=\(d.id)", "--no-audio", "--window-title=\(d.name)"] + quality.args
-        if let s = slot { a += ["--window-x=\(s.x)", "--window-y=60", "--window-width=\(s.w)", "--window-height=\(s.h)"] }
+    func args(_ p: Phone, _ d: DisplayInfo, slot: (x: Int, w: Int, h: Int)?, upscaled: Bool = false) -> [String] {
+        var a = ["-s", p.serial, "--display-id=\(d.id)", "--no-audio", "--window-title=\(d.name)"] + quality.args(upscaled: upscaled)
+        if let s = slot {
+            a += ["--window-x=\(s.x)", "--window-y=60", "--window-width=\(s.w)", "--window-height=\(s.h)"]
+        } else if upscaled {
+            // fenêtre à la taille physique : sur écran Retina, c'est exactement 1 pixel vidéo = 1 pixel écran
+            let dims = d.size.split(separator: "x").compactMap { Int($0) }
+            if dims.count == 2 { a += ["--window-width=\(dims[0])", "--window-height=\(dims[1])"] }
+        }
         return a
+    }
+
+    /// Applique le HD ×2 à l'écran arrière si la case est cochée, puis appelle `then` avec les écrans concernés.
+    func prepareUpscale(_ p: Phone, _ ts: [DisplayInfo], then: @escaping (Set<String>) -> Void) {
+        guard upscaleCheck.state == .on, let rear = ts.first(where: { $0.role == .rear }) else { then([]); return }
+        // pas de changement de résolution sous un flux déjà en cours
+        if upscaleSession == nil && (running(mirrors) || running(records)) { then([]); return }
+        upscaleBusy = true
+        status.stringValue = t("upscale.enabling")
+        DispatchQueue.global().async {
+            let r = enableUpscale(p.serial, rear)
+            DispatchQueue.main.async {
+                self.upscaleBusy = false
+                switch r {
+                case .ok:
+                    self.upscaleSession = (p.serial, rear.id)
+                    then([rear.id])
+                case .needsSecurity:
+                    let a = NSAlert()
+                    a.messageText = t("upscale.needSecurity.title")
+                    a.informativeText = t("upscale.needSecurity.info")
+                    a.runModal()
+                    then([])
+                case .custom:
+                    self.status.stringValue = t("upscale.custom")
+                    then([])
+                case .failed(let m):
+                    self.status.stringValue = t("upscale.failed", m)
+                    then([])
+                }
+            }
+        }
+    }
+
+    /// Remet l'écran arrière à la normale quand plus rien ne l'utilise.
+    func endUpscaleIfIdle() {
+        guard let s = upscaleSession, !upscaleBusy, !photoBusy, launchPending == 0,
+              !running(mirrors), !running(records) else { return }
+        upscaleBusy = true
+        DispatchQueue.global().async {
+            resetUpscale(s.serial, s.displayId)
+            DispatchQueue.main.async { self.upscaleSession = nil; self.upscaleBusy = false }
+        }
     }
 
     /// Lance les instances scrcpy l'une après l'autre (≈2,5 s d'écart) : deux démarrages simultanés
@@ -515,9 +659,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func launchStaggered(_ argsList: [[String]], onStart: @escaping (Process) -> Void) {
         launchGen += 1
         let gen = launchGen
+        launchPending += argsList.count
         for (i, a) in argsList.enumerated() {
             DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 2.5) { [weak self] in
-                guard let self = self, self.launchGen == gen else { return }
+                guard let self = self else { return }
+                self.launchPending -= 1
+                guard self.launchGen == gen else { return }
                 let proc = spawn(a)
                 try? proc.run()
                 onStart(proc)
@@ -537,11 +684,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             a.messageText = t("rec.inProgress")
             a.runModal(); return
         }
-        guard let p = readyPhone() else { return }
+        guard let p = readyPhone(), !upscaleBusy, !photoBusy else { return }
         let ts = selectedTargets
         mirrors = []
-        let slots = windowLayout(ts)
-        launchStaggered(ts.enumerated().map { i, d in args(p, d, slot: slots[i]) }) { self.mirrors.append($0) }
+        prepareUpscale(p, ts) { up in
+            let slots = self.windowLayout(ts)
+            self.launchStaggered(ts.enumerated().map { i, d in self.args(p, d, slot: slots[i], upscaled: up.contains(d.id)) }) { self.mirrors.append($0) }
+        }
     }
 
     @objc func toggleRecord() {
@@ -552,25 +701,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             status.stringValue = t("rec.saved", recFiles.map(\.lastPathComponent).joined(separator: ", "))
             return
         }
-        guard let p = readyPhone() else { return }
+        guard let p = readyPhone(), !upscaleBusy, !photoBusy else { return }
         launchGen += 1
         mirrors.forEach { stop($0) }
         try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
         let ts = selectedTargets
         let st = stamp()
-        recFiles = []
-        var jobs: [[String]] = []
-        let slots = windowLayout(ts)
-        for (i, d) in ts.enumerated() {
-            let file = outDir.appendingPathComponent("ecran_\(d.slug)_\(st).mp4")
-            recFiles.append(file)
-            var a = args(p, d, slot: slots[i]) + ["--record=\(file.path)"]
-            if !showWhileRecording { a.append("--no-playback") }
-            jobs.append(a)
-        }
+        recFiles = ts.map { outDir.appendingPathComponent("ecran_\($0.slug)_\(st).mp4") }
         records = []
-        recStart = Date()
-        launchStaggered(jobs) { self.records.append($0) }
+        prepareUpscale(p, ts) { up in
+            let slots = self.windowLayout(ts)
+            var jobs: [[String]] = []
+            for (i, d) in ts.enumerated() {
+                var a = self.args(p, d, slot: slots[i], upscaled: up.contains(d.id)) + ["--record=\(self.recFiles[i].path)"]
+                if !self.showWhileRecording { a.append("--no-playback") }
+                jobs.append(a)
+            }
+            self.recStart = Date()
+            self.launchStaggered(jobs) { self.records.append($0) }
+        }
     }
 
     func stamp() -> String {
@@ -581,11 +730,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // MARK: photo
 
     @objc func takePhoto() {
-        guard let p = readyPhone() else { return }
+        guard let p = readyPhone(), !upscaleBusy, !photoBusy else { return }
         let ts = selectedTargets
         let st = stamp()
+        photoBusy = true
         status.stringValue = t("photo.capturing")
+        prepareUpscale(p, ts) { _ in self.capture(p, ts, st) }
+    }
+
+    func capture(_ p: Phone, _ ts: [DisplayInfo], _ st: String) {
         DispatchQueue.global().async {
+            defer { DispatchQueue.main.async { self.photoBusy = false } }
+            Thread.sleep(forTimeInterval: 0.5)
             try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
             var saved: [URL] = []
             for d in ts {
@@ -685,6 +841,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // MARK: UI
 
     func tick() {
+        endUpscaleIfIdle()
         mirrorBtn.title = running(mirrors) ? t("mirror.stop") : t("mirror.start")
         if running(records) {
             recBtn.title = t("rec.stop")
@@ -698,7 +855,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool { true }
-    func applicationWillTerminate(_ n: Notification) { mirrors.forEach { stop($0) }; records.forEach { stop($0) } }
+    func applicationWillTerminate(_ n: Notification) {
+        mirrors.forEach { stop($0) }; records.forEach { stop($0) }
+        if let s = upscaleSession { resetUpscale(s.serial, s.displayId) }   // jamais laisser le téléphone en ×2
+    }
 }
 
 extension Array {
