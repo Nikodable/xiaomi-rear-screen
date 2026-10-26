@@ -48,6 +48,14 @@ Choose **Both screens** in the *Screen* menu. Two windows open side by side, abo
 > **Stage Manager:** macOS shows only one app at a time on stage, so one mirror may sit as a thumbnail on the left.
 > Drag that thumbnail onto the stage, or Shift-click it, to see both. Turning Stage Manager off also works.
 
+### Phone frame (optional)
+The **Frame** menu puts the rear screen inside a phone with its camera module. It starts on **No frame** and you can return to it at any time.
+
+- **Live mirror** *(macOS)*: the mirror opens as a phone-shaped window (view only, no touch). Drag to move, hover for the close button, or press Esc.
+- **Photos**: a second file `…_cadre.png` is saved next to the plain one.
+- **Videos** *(macOS)*: after a recording, `…_cadre.mp4` is produced next to the plain file.
+- Use your own frame, or build one from a picture: see [docs/FRAMES.md](../docs/FRAMES.md).
+
 ### HD ×2 (experimental)
 Tick **HD ×2** to double the rear screen's resolution (e.g. 976×596 → 1952×1192): text and widgets become sharper in the mirror, recordings and photos. The animated wallpaper does not gain detail.
 

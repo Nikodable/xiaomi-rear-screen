@@ -21,5 +21,7 @@
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../third_party/scrcpy-win64-v4.1.zip" LogicalName="scrcpy.zip" />
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)../docs/frame/phone-frame.png" LogicalName="frame-default.png" />
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)../docs/frame/phone-frame.json" LogicalName="frame-default.json" />
   </ItemGroup>
 </Project>

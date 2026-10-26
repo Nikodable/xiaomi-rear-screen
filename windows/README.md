@@ -5,7 +5,7 @@ A single `.exe`, with scrcpy and adb built in: nothing else to install.
 
 - **Requires:** Windows 11 (Mica background on 22H2 or newer) or Windows 10, 64-bit (x64; ARM PCs run it through emulation)
 - **Phone:** Android with USB debugging (built for a Xiaomi 18 Pro Max)
-- **Status:** version 1.0.0 was tested on a Windows PC and worked. The features added since (languages, both screens, HD ×2) have so far been verified on macOS only — please report anything odd.
+- **Status:** version 1.0.0 was tested on a Windows PC and worked. The features added since (languages, both screens, HD ×2, phone frames) have so far been verified on macOS only — please report anything odd.
 
 ---
 
@@ -50,6 +50,16 @@ Files are saved in **`Videos\EcranArriere`**, named `ecran_<screen>_<date>_<time
 ### Showing both screens
 Choose **Both screens** in the *Screen* menu. Two windows open side by side, about 2.5 seconds apart. Recording produces two separate MP4 files.
 
+### Phone frame (optional)
+The **Frame** menu puts the rear screen inside a phone with its camera module. It starts on **No frame** and you can return to it at any time.
+
+- **Live mirror** *(macOS)*: the mirror opens as a phone-shaped window (view only, no touch). Drag to move, hover for the close button, or press Esc.
+- **Photos**: a second file `…_cadre.png` is saved next to the plain one.
+- **Videos** *(macOS)*: after a recording, `…_cadre.mp4` is produced next to the plain file.
+- Use your own frame, or build one from a picture: see [docs/FRAMES.md](../docs/FRAMES.md).
+
+On Windows, only **photos** are framed for now (live mirror and videos are not available yet).
+
 ### HD ×2 (experimental)
 Tick **HD ×2** to double the rear screen's resolution (e.g. 976×596 → 1952×1192): text and widgets become sharper in the mirror, recordings and photos. The animated wallpaper does not gain detail.
 
@@ -85,4 +95,4 @@ Delete `EcranArriere.exe`. To remove everything it created:
 - No audio is captured.
 - When recording both screens, the second video starts about 2.5 s after the first.
 - The app is not code-signed (hence the SmartScreen step above).
-- The additions since 1.0.0 (languages, both screens, HD ×2) are not yet validated on Windows hardware.
+- The additions since 1.0.0 (languages, both screens, HD ×2, phone frames) are not yet validated on Windows hardware.

@@ -3,6 +3,23 @@
 All notable changes. Format based on [Keep a Changelog](https://keepachangelog.com/); versions follow [SemVer](https://semver.org/).
 The macOS and Windows apps share one version number.
 
+## [1.3.0] — 2026-10-21
+### Added
+- **Phone frame** (optional, rear screen only): a *Frame* menu that always starts on **No frame**.
+  - *macOS:* live mirror inside a phone-shaped window (view only), plus framed photos and framed videos.
+  - *Windows:* framed photos.
+  - Built-in **Default** frame, an original illustration with the camera module around the rear display.
+  - **Transparent background** by default: the desktop shows through around the phone in the live window (with a shadow following its shape) and photos are transparent PNGs. Videos stay black (MP4 has no transparency).
+  - **Your own frames**: drop a `frame.png` + `frame.json` folder in your personal folder; `scripts/make-custom-frame.py` builds one from any phone picture (grid, colour detection, lens cut-outs, background removal). The tool never writes inside the repository.
+- Guide: [docs/FRAMES.md](docs/FRAMES.md).
+
+### Changed
+- README rewritten with an annotated quick tour, a language board and a live-mirror screenshot (the tour and board now show the *Frame* menu).
+
+### Notes
+- Live frame mode reads the video stream directly (no scrcpy window), so there is no touch control in that mode.
+- Windows: live frame and framed videos are not available yet; the frame code is compiled but untested on a Windows PC.
+
 ## [1.2.0] — 2026-10-21
 ### Added
 - **HD ×2 (experimental)** option for the rear screen: doubles its resolution on the phone (`wm size` / `wm density`), so text and widgets are sharper in the mirror, recordings and photos (e.g. 976×596 → 1952×1192). Off by default.

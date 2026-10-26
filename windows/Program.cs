@@ -4,12 +4,14 @@ using System.IO.Compression;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Microsoft.Win32;
 
@@ -206,6 +208,98 @@ record DisplayInfo(string Id, string Size, string? LocalId, Role Role)
     };
 }
 
+/// Cadre : image RGBA avec une zone transparente à la place de l'écran.
+record PhoneFrame(string Id, string Name, BitmapSource Image, double Width, double Height, Rect Screen, double Radius, bool TransparentBackground);
+
+static class Frames
+{
+    public const string DefaultId = "default";
+    public const string NoneId = "none";      // « Aucun cadre » : choix toujours disponible, et valeur par défaut
+
+    /// %APPDATA%\RearScreen\frames
+    public static string UserDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "RearScreen", "frames");
+
+    /// Le cadre par défaut (embarqué) d'abord, puis ceux du dossier de l'utilisateur.
+    public static List<PhoneFrame> LoadAll()
+    {
+        var list = new List<PhoneFrame>();
+        try
+        {
+            var asm = Assembly.GetExecutingAssembly();
+            using var png = asm.GetManifestResourceStream("frame-default.png");
+            using var json = asm.GetManifestResourceStream("frame-default.json");
+            if (png != null && json != null && Parse(png, json, DefaultId, I18N.T("frame.default")) is { } f) list.Add(f);
+        }
+        catch { }
+        try
+        {
+            if (Directory.Exists(UserDir))
+                foreach (var d in Directory.GetDirectories(UserDir).OrderBy(x => x, StringComparer.CurrentCultureIgnoreCase))
+                {
+                    try
+                    {
+                        using var png = File.OpenRead(Path.Combine(d, "frame.png"));
+                        using var json = File.OpenRead(Path.Combine(d, "frame.json"));
+                        var name = Path.GetFileName(d);
+                        if (Parse(png, json, name, name) is { } f) list.Add(f);
+                    }
+                    catch { }
+                }
+        }
+        catch { }
+        return list;
+    }
+
+    static PhoneFrame? Parse(Stream png, Stream json, string id, string fallbackName)
+    {
+        var bmp = new BitmapImage();
+        bmp.BeginInit(); bmp.CacheOption = BitmapCacheOption.OnLoad; bmp.StreamSource = png; bmp.EndInit(); bmp.Freeze();
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        var scr = root.GetProperty("screen");
+        // les coordonnées du JSON sont celles de l'image d'origine : on les ramène à la taille réelle du PNG
+        var jw = root.TryGetProperty("width", out var w) ? w.GetDouble() : bmp.PixelWidth;
+        var k = jw > 0 ? bmp.PixelWidth / jw : 1;
+        var rect = new Rect(scr.GetProperty("x").GetDouble() * k, scr.GetProperty("y").GetDouble() * k,
+                            scr.GetProperty("w").GetDouble() * k, scr.GetProperty("h").GetDouble() * k);
+        if (rect.Width <= 0 || rect.Height <= 0 || rect.Right > bmp.PixelWidth + 1 || rect.Bottom > bmp.PixelHeight + 1) return null;
+        var radius = scr.TryGetProperty("radius", out var r) ? r.GetDouble() * k : 0;
+        var name = root.TryGetProperty("name", out var n) && n.GetString() is { Length: > 0 } nm ? nm : fallbackName;
+        var transparent = root.TryGetProperty("background", out var bg) && bg.GetString() == "transparent";
+        return new PhoneFrame(id, id == DefaultId ? fallbackName : name, bmp, bmp.PixelWidth, bmp.PixelHeight, rect, radius, transparent);
+    }
+
+    /// Insère la capture d'écran dans le cadre et retourne un PNG (à appeler sur le thread de l'interface).
+    public static byte[]? ComposePhoto(byte[] screenshot, PhoneFrame f)
+    {
+        try
+        {
+            var shot = new BitmapImage();
+            using (var ms = new MemoryStream(screenshot)) { shot.BeginInit(); shot.CacheOption = BitmapCacheOption.OnLoad; shot.StreamSource = ms; shot.EndInit(); }
+            shot.Freeze();
+            int w = (int)f.Width, h = (int)f.Height;
+            var dv = new DrawingVisual();
+            using (var dc = dv.RenderOpen())
+            {
+                if (!f.TransparentBackground) dc.DrawRectangle(Brushes.Black, null, new Rect(0, 0, w, h));
+                dc.DrawRectangle(Brushes.Black, null, f.Screen);
+                var k = Math.Min(f.Screen.Width / shot.PixelWidth, f.Screen.Height / shot.PixelHeight);
+                double dw = shot.PixelWidth * k, dh = shot.PixelHeight * k;
+                dc.DrawImage(shot, new Rect(f.Screen.X + (f.Screen.Width - dw) / 2, f.Screen.Y + (f.Screen.Height - dh) / 2, dw, dh));
+                dc.DrawImage(f.Image, new Rect(0, 0, w, h));     // le cadre par-dessus : ses bords opaques masquent les coins de l'écran
+            }
+            var rtb = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
+            rtb.Render(dv);
+            var enc = new PngBitmapEncoder();
+            enc.Frames.Add(BitmapFrame.Create(rtb));
+            using var o = new MemoryStream();
+            enc.Save(o);
+            return o.ToArray();
+        }
+        catch { return null; }
+    }
+}
+
 enum Quality { Light, Normal, Max }
 
 static class Q
@@ -373,6 +467,13 @@ class MainWindow : Window
     List<Process> mirrors = new(), records = new();
     CheckBox upscaleCheck = new();
     bool upscaleWanted, upscaleBusy, photoBusy;
+    List<PhoneFrame> frames = new();
+    ComboBox framePopup = new();
+    bool fillingFrames;
+    string frameId = Frames.NoneId;                       // « Aucun cadre » par défaut
+    PhoneFrame? CurrentFrame => frames.FirstOrDefault(f => f.Id == frameId);
+    bool frameWanted => frameId != Frames.NoneId && CurrentFrame != null;
+    const string RegPath = @"HKEY_CURRENT_USER\Software\EcranArriere";
     (string Serial, string DisplayId)? upscaleSession;   // HD ×2 appliqué (ou en cours) par l'app
     int launchPending;                                    // lancements programmés, pas encore exécutés
     DateTime recStart;
@@ -402,6 +503,11 @@ class MainWindow : Window
         FontFamily = new FontFamily("Segoe UI Variable Text, Segoe UI");
         Foreground = new SolidColorBrush(dark ? Colors.White : Color.FromRgb(0x1B, 0x1B, 0x1B));
         Background = new SolidColorBrush(dark ? Color.FromRgb(0x20, 0x20, 0x20) : Color.FromRgb(0xF3, 0xF3, 0xF3));
+        try
+        {
+            if (Registry.GetValue(RegPath, "FrameId", null) is string fi && fi.Length > 0) frameId = fi;
+        }
+        catch { }
         BuildUi();
 
         Loaded += (_, _) =>
@@ -513,6 +619,10 @@ class MainWindow : Window
         viewCheck = new CheckBox { Content = I18N.T("rec.viewCheck"), IsChecked = showWhileRecording };
         viewCheck.Click += (_, _) => showWhileRecording = viewCheck.IsChecked == true;
         upscaleCheck = new CheckBox { Content = I18N.T("upscale.check"), IsChecked = upscaleWanted, ToolTip = I18N.T("upscale.tip"), IsEnabled = displays.Any(d => d.Role == Role.Rear) };
+        if (frames.Count == 0) frames = Frames.LoadAll();
+        framePopup = new ComboBox { Height = 32, ToolTip = I18N.T("frame.tip") };
+        FillFramePopup();
+        framePopup.SelectionChanged += (_, _) => OnFrameChanged();
         upscaleCheck.Click += (_, _) =>
         {
             upscaleWanted = upscaleCheck.IsChecked == true;
@@ -527,7 +637,7 @@ class MainWindow : Window
         langPopup.SelectedIndex = Array.FindIndex(I18N.Langs, l => l.Code == I18N.Current);
         langPopup.SelectionChanged += (_, _) => OnLangChanged();
 
-        var refreshBtn = Btn("↻", (_, _) => { displaysSerial = null; Refresh(); });
+        var refreshBtn = Btn("↻", (_, _) => { displaysSerial = null; frames = Frames.LoadAll(); FillFramePopup(); Refresh(); });
         refreshBtn.Width = 40; refreshBtn.Height = 32; refreshBtn.ToolTip = I18N.T("tip.refresh");
 
         mirrorBtn = Btn(I18N.T("mirror.start"), (_, _) => ToggleMirror()); StyleAccent(mirrorBtn, Color.FromRgb(0x5B, 0x6C, 0xFF));
@@ -546,7 +656,7 @@ class MainWindow : Window
         titleRow.Children.Add(title);
         titleRow.Children.Add(langPopup);
 
-        var cardA = Card(status, Row(I18N.T("label.phone"), devicePopup, refreshBtn), Row(I18N.T("label.display"), displayPopup), Row(I18N.T("label.quality"), qualityPopup));
+        var cardA = Card(status, Row(I18N.T("label.phone"), devicePopup, refreshBtn), Row(I18N.T("label.display"), displayPopup), Row(I18N.T("label.quality"), qualityPopup), Row(I18N.T("frame.label"), framePopup));
         var cardB = Card(mirrorBtn, recBtn, viewCheck, upscaleCheck, timerLabel, TwoCols(photoBtn, folder));
         var cardC = Card(TwoCols(wifi, manual));
 
@@ -558,6 +668,39 @@ class MainWindow : Window
         Content = root;
     }
 
+    /// Menu « Cadre » : « Aucun cadre », puis les cadres disponibles, puis « Ouvrir le dossier des cadres… ».
+    void FillFramePopup()
+    {
+        fillingFrames = true;
+        framePopup.Items.Clear();
+        framePopup.Items.Add(I18N.T("frame.none"));
+        foreach (var f in frames) framePopup.Items.Add(f.Name);
+        framePopup.Items.Add(I18N.T("frame.openFolder"));
+        SelectCurrentFrame();
+        fillingFrames = false;
+    }
+
+    void SelectCurrentFrame()
+    {
+        var i = frames.FindIndex(f => f.Id == frameId);
+        framePopup.SelectedIndex = i >= 0 ? i + 1 : 0;
+    }
+
+    void OnFrameChanged()
+    {
+        if (fillingFrames || framePopup.SelectedIndex < 0) return;
+        var i = framePopup.SelectedIndex;
+        if (i > frames.Count)                                // dernière ligne : ouvre le dossier des cadres
+        {
+            Directory.CreateDirectory(Frames.UserDir);
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{Frames.UserDir}\"") { UseShellExecute = true });
+            fillingFrames = true; SelectCurrentFrame(); fillingFrames = false;
+            return;
+        }
+        frameId = i == 0 ? Frames.NoneId : frames[i - 1].Id;
+        try { Registry.SetValue(RegPath, "FrameId", frameId, RegistryValueKind.String); } catch { }
+    }
+
     void OnLangChanged()
     {
         if (suppress || langPopup.SelectedIndex < 0) return;
@@ -565,6 +708,7 @@ class MainWindow : Window
         var q = qualityPopup.SelectedIndex;
         var prev = SelectedTargets.Select(d => d.Id).ToList();
         I18N.Set(I18N.Langs[langPopup.SelectedIndex].Code);
+        frames = Frames.LoadAll();          // le nom du cadre par défaut est traduit
         Title = I18N.T("app.name");
         suppress = true;
         BuildUi();
@@ -875,6 +1019,7 @@ class MainWindow : Window
         var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         photoBusy = true;
         status.Text = I18N.T("photo.capturing");
+        var frame = frameWanted ? CurrentFrame : null;
         try
         {
             await PrepareUpscale(p, ts);
@@ -897,6 +1042,15 @@ class MainWindow : Window
                     var file = Path.Combine(OutDir, $"ecran_{d.Slug}_{stamp}.png");
                     try { File.WriteAllBytes(file, data); saved.Add(file); }
                     catch { return I18N.T("photo.writeFail"); }
+                    if (frame != null && d.Role == Role.Rear)
+                    {
+                        var framed = Dispatcher.Invoke(() => Frames.ComposePhoto(data, frame));
+                        if (framed != null)
+                        {
+                            var ff = Path.Combine(OutDir, $"ecran_{d.Slug}_{stamp}_cadre.png");
+                            try { File.WriteAllBytes(ff, framed); saved.Add(ff); } catch { }
+                        }
+                    }
                 }
                 if (saved.Count > 0)
                     Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{saved[0]}\"") { UseShellExecute = true });

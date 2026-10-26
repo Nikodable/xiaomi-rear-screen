@@ -13,10 +13,13 @@ ZIP="dist/RearScreen-macOS-arm64-v$VERSION.zip"
 
 rm -rf dist; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-swiftc -O -target arm64-apple-macos12.0 swift/Strings.swift swift/main.swift -o "$APP/Contents/MacOS/EcranArriere"
+swiftc -O -target arm64-apple-macos12.0 swift/Strings.swift swift/Frames.swift swift/LiveView.swift swift/main.swift -o "$APP/Contents/MacOS/EcranArriere"
 cp icon/AppIcon.icns "$APP/Contents/Resources/"
 cp "$SRC/scrcpy" "$SRC/adb" "$SRC/scrcpy-server" "$SRC/LICENSE" "$APP/Contents/Resources/"
 cp "$ROOT/NOTICE" "$APP/Contents/Resources/NOTICE"
+mkdir -p "$APP/Contents/Resources/frames/default"
+cp "$ROOT/docs/frame/phone-frame.png" "$APP/Contents/Resources/frames/default/frame.png"
+cp "$ROOT/docs/frame/phone-frame.json" "$APP/Contents/Resources/frames/default/frame.json"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

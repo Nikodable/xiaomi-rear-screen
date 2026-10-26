@@ -6,7 +6,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 LANGS = [("fr", "Français"), ("en", "English"), ("de", "Deutsch"), ("es", "Español"), ("it", "Italiano"), ("pt", "Português")]
-CROP = (36, 36, 846, 1090)       # fenêtre seule (sans le fond noir du bureau)
+CROP = (28, 30, 830, 1143)       # fenêtre seule (sans le fond noir du bureau)
 S = 2
 COLS, ROWS = 3, 2
 CW = 520                         # largeur d'une fenêtre dans la planche

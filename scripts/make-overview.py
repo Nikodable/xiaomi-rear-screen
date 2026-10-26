@@ -9,9 +9,9 @@ shot = Image.open(os.path.join(ROOT, "docs", "app-screenshot.png")).convert("RGB
 
 S = 2                                   # sur-échantillonnage pour des traits propres
 SCALE = 0.92                            # taille de la capture dans l'illustration
-W, H = 1760, 1080
+W, H = 1760, 1120
 PAD_X, PAD_Y = 50, 40
-CROP = (14, 18, 816, 1064)              # fenêtre seule dans la capture d'origine (sans le fond noir du bureau)
+CROP = (28, 30, 830, 1143)              # fenêtre seule dans la capture d'origine (sans le fond noir du bureau)
 LABEL_X = 1010                          # colonne des textes
 INK, LINE, WARN, GREY = (28, 28, 30), (59, 111, 212), (200, 40, 40), (90, 90, 96)
 
@@ -40,16 +40,17 @@ def sy(y): return (PAD_Y + (y - CROP[1]) * SCALE) * S
 
 # (numéro, y de l'élément, x où la flèche le touche [capture d'origine], y du texte [illustration], titre, détail, avertissement ?)
 items = [
-    (1,  124, 782, 150, "Language",               "French, English, German, Spanish, Italian, Portuguese", False),
-    (2,  312, 782, 292, "Phone",                  "Your phone, connected by USB (the refresh button searches again)", False),
-    (3,  384, 692, 362, "Screen",                 "Rear screen, front screen, or both screens at once", False),
-    (4,  452, 692, 432, "Quality",                "Light / Normal / Max — choose Max for the best result", False),
-    (5,  583, 756, 535, "Live mirror",            "Opens a live window of the selected screen(s)", False),
-    (6,  659, 756, 608, "Record",                 "Records to MP4 — one file per screen", False),
-    (7,  722, 520, 681, "Mirror while recording", "Untick to record without opening the window", False),
-    (8,  775, 540, 754, "HD ×2 (experimental)",   "Sharper rear screen — needs “USB debugging (Security settings)”", False),
-    (9,  839, 756, 827, "Photo · Open folder",    "Saves a PNG screenshot · opens the folder with your files", False),
-    (10, 974, 756, 930, "Wi-Fi (optional)",       "USB is more stable for long recordings", True),
+    (1,  136, 796, 150, "Language",               "French, English, German, Spanish, Italian, Portuguese", False),
+    (2,  324, 796, 300, "Phone",                  "Your phone, connected by USB (the refresh button searches again)", False),
+    (3,  396, 703, 368, "Screen",                 "Rear screen, front screen, or both screens at once", False),
+    (4,  464, 703, 436, "Quality",                "Light / Normal / Max — choose Max for the best result", False),
+    (5,  532, 703, 504, "Frame",                  "No frame by default — or show the rear screen inside a phone", False),
+    (6,  664, 767, 600, "Live mirror",            "Opens a live window of the selected screen(s)", False),
+    (7,  740, 767, 668, "Record",                 "Records to MP4 — one file per screen", False),
+    (8,  803, 535, 736, "Mirror while recording", "Untick to record without opening the window", False),
+    (9,  855, 560, 804, "HD ×2 (experimental)",   "Sharper rear screen — needs “USB debugging (Security settings)”", False),
+    (10, 919, 767, 872, "Photo · Open folder",    "Saves a PNG screenshot · opens the folder with your files", False),
+    (11, 1055, 767, 960, "Wi-Fi (optional)",      "USB is more stable for long recordings", True),
 ]
 
 for n, y, x, ty, title, detail, warn in items:

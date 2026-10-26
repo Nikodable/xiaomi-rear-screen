@@ -211,13 +211,17 @@ enum Quality: Int, CaseIterable {
         case .max: return t("quality.max")
         }
     }
-    /// Réglages scrcpy ; en HD ×2 l'image a 4× plus de pixels, on monte donc le débit.
-    func args(upscaled: Bool = false) -> [String] {
+    /// Débit (bit/s) et images/s ; en HD ×2 l'image a 4× plus de pixels, on monte donc le débit.
+    func numbers(upscaled: Bool = false) -> (bitrate: Int, fps: Int) {
         switch self {
-        case .light: return [upscaled ? "--video-bit-rate=8M" : "--video-bit-rate=4M", "--max-fps=30"]
-        case .normal: return [upscaled ? "--video-bit-rate=16M" : "--video-bit-rate=8M", "--max-fps=60"]
-        case .max: return [upscaled ? "--video-bit-rate=24M" : "--video-bit-rate=20M", "--max-fps=120"]
+        case .light: return (upscaled ? 8_000_000 : 4_000_000, 30)
+        case .normal: return (upscaled ? 16_000_000 : 8_000_000, 60)
+        case .max: return (upscaled ? 24_000_000 : 20_000_000, 120)
         }
+    }
+    func args(upscaled: Bool = false) -> [String] {
+        let n = numbers(upscaled: upscaled)
+        return ["--video-bit-rate=\(n.bitrate / 1_000_000)M", "--max-fps=\(n.fps)"]
     }
 }
 
@@ -256,6 +260,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var upscaleBusy = false
     var photoBusy = false
     var activity: NSObjectProtocol?
+    var frames: [PhoneFrame] = []
+    var framePopup = NSPopUpButton()
+    var frameId = UserDefaults.standard.string(forKey: "frameId") ?? Frames.noneId      // « Aucun cadre » par défaut
+    var frameWanted: Bool { frameId != Frames.noneId && currentFrame != nil }
+    var lives: [LiveMirror] = []
+    var pendingFramed: [(src: URL, name: String)] = []
+    var framedBusy = false
+    var currentFrame: PhoneFrame? { frames.first(where: { $0.id == frameId }) }
+    var liveRunning: Bool { lives.contains { $0.isRunning } }
+    func usesLive(_ d: DisplayInfo) -> Bool { frameWanted && currentFrame != nil && d.role == .rear }
 
     var selectedPhone: Phone? {
         let i = devicePopup.indexOfSelectedItem
@@ -352,6 +366,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         upscaleCheck.state = upscaleWanted ? .on : .off
         upscaleCheck.toolTip = t("upscale.tip")
         upscaleCheck.isEnabled = displays.contains { $0.role == .rear }
+        if frames.isEmpty { frames = Frames.loadAll() }
+        framePopup = NSPopUpButton()
+        fillFramePopup()
+        framePopup.target = self; framePopup.action = #selector(frameChanged)
+        framePopup.toolTip = t("frame.tip")
         timerLabel.font = NSFont.monospacedSystemFont(ofSize: 14, weight: .medium)
         timerLabel.alignment = .center
         timerLabel.isHidden = true
@@ -393,11 +412,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let cardA = card([status,
                           labeled(t("label.phone"), devicePopup, extra: refreshBtn),
                           labeled(t("label.display"), displayPopup),
-                          labeled(t("label.quality"), qualityPopup)])
+                          labeled(t("label.quality"), qualityPopup),
+                          labeled(t("frame.label"), framePopup)])
         let cardB = card([mirrorBtn, recBtn, viewCheck, upscaleCheck, timerLabel, photoRow])
         let cardC = card([wifiRow])
 
-        for p in [devicePopup, displayPopup, qualityPopup] {
+        for p in [devicePopup, displayPopup, qualityPopup, framePopup] {
             p.widthAnchor.constraint(equalToConstant: 224).isActive = true
         }
 
@@ -441,6 +461,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func setStatus(_ s: String) { DispatchQueue.main.async { self.status.stringValue = s } }
 
     @objc func viewCheckChanged() { showWhileRecording = viewCheck.state == .on }
+    /// Menu « Cadre » : « Aucun cadre », puis les cadres disponibles, puis « Ouvrir le dossier des cadres… ».
+    func fillFramePopup() {
+        framePopup.removeAllItems()
+        framePopup.addItem(withTitle: t("frame.none"))
+        for f in frames { framePopup.addItem(withTitle: f.name) }
+        framePopup.menu?.addItem(.separator())
+        framePopup.addItem(withTitle: t("frame.openFolder"))
+        selectCurrentFrame()
+    }
+
+    func selectCurrentFrame() {
+        framePopup.selectItem(at: (frames.firstIndex(where: { $0.id == frameId }).map { $0 + 1 }) ?? 0)
+    }
+
+    @objc func frameChanged() {
+        let i = framePopup.indexOfSelectedItem
+        if i > frames.count {                                        // dernière ligne : ouvrir le dossier des cadres
+            try? FileManager.default.createDirectory(at: Frames.userDir, withIntermediateDirectories: true)
+            NSWorkspace.shared.open(Frames.userDir)
+            selectCurrentFrame()
+            return
+        }
+        frameId = i == 0 ? Frames.noneId : frames[i - 1].id
+        UserDefaults.standard.set(frameId, forKey: "frameId")
+    }
+
     @objc func upscaleCheckChanged() {
         upscaleWanted = upscaleCheck.state == .on
         fillDisplays(keep: selectedTargets.map(\.id))   // la résolution affichée suit la case
@@ -459,6 +505,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let q = qualityPopup.indexOfSelectedItem
         let prev = selectedTargets.map(\.id)
         I18N.set(l)
+        frames = Frames.loadAll()          // le nom du cadre par défaut est traduit
         buildMenu()
         buildWindow()
         qualityPopup.selectItem(at: q)
@@ -469,7 +516,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     // MARK: détection du téléphone
 
-    @objc func forceRefresh() { displaysSerial = nil; refresh() }
+    @objc func forceRefresh() { displaysSerial = nil; frames = Frames.loadAll(); fillFramePopup(); refresh() }
     @objc func deviceChanged() { displaysSerial = nil; refresh() }
 
     @objc func refresh() {
@@ -646,7 +693,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Remet l'écran arrière à la normale quand plus rien ne l'utilise.
     func endUpscaleIfIdle() {
         guard let s = upscaleSession, !upscaleBusy, !photoBusy, launchPending == 0,
-              !running(mirrors), !running(records) else { return }
+              !running(mirrors), !running(records), !liveRunning else { return }
         upscaleBusy = true
         DispatchQueue.global().async {
             resetUpscale(s.serial, s.displayId)
@@ -677,8 +724,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    /// Ouvre le miroir en direct de l'écran arrière dans le cadre du téléphone.
+    func startLive(_ p: Phone, _ d: DisplayInfo, slot: (x: Int, w: Int, h: Int)?, upscaled: Bool, source: String) {
+        guard let f = currentFrame else { return }
+        let n = quality.numbers(upscaled: upscaled)
+        let m = LiveMirror(serial: p.serial, displayId: d.id, frame: f, source: source)
+        m.onEnded = { [weak self] done in self?.lives.removeAll { $0 === done } }
+        lives.append(m)
+        var topLeft: NSPoint?
+        if let s = slot, let vis = NSScreen.main?.visibleFrame { topLeft = NSPoint(x: vis.minX + CGFloat(s.x), y: vis.maxY - 40) }
+        m.start(bitrate: n.bitrate, fps: n.fps, topLeft: topLeft)
+    }
+
+    func stopLives(source: String? = nil) {
+        lives.filter { source == nil || $0.source == source }.forEach { $0.stop() }
+    }
+
     @objc func toggleMirror() {
-        if running(mirrors) { launchGen += 1; let ps = mirrors; DispatchQueue.global().async { ps.forEach { stop($0) } }; return }
+        if running(mirrors) || liveRunning {
+            launchGen += 1
+            let ps = mirrors
+            DispatchQueue.global().async { ps.forEach { stop($0) } }
+            stopLives()
+            return
+        }
         if running(records) {
             let a = NSAlert()
             a.messageText = t("rec.inProgress")
@@ -689,7 +758,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         mirrors = []
         prepareUpscale(p, ts) { up in
             let slots = self.windowLayout(ts)
-            self.launchStaggered(ts.enumerated().map { i, d in self.args(p, d, slot: slots[i], upscaled: up.contains(d.id)) }) { self.mirrors.append($0) }
+            var jobs: [[String]] = []
+            for (i, d) in ts.enumerated() {
+                if self.usesLive(d) { self.startLive(p, d, slot: slots[i], upscaled: up.contains(d.id), source: "mirror") }
+                else { jobs.append(self.args(p, d, slot: slots[i], upscaled: up.contains(d.id))) }
+            }
+            self.launchStaggered(jobs) { self.mirrors.append($0) }
         }
     }
 
@@ -698,12 +772,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             launchGen += 1
             let ps = records
             DispatchQueue.global().async { ps.forEach { stop($0) } }
+            stopLives(source: "record")
             status.stringValue = t("rec.saved", recFiles.map(\.lastPathComponent).joined(separator: ", "))
             return
         }
         guard let p = readyPhone(), !upscaleBusy, !photoBusy else { return }
         launchGen += 1
         mirrors.forEach { stop($0) }
+        stopLives()
         try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
         let ts = selectedTargets
         let st = stamp()
@@ -714,7 +790,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             var jobs: [[String]] = []
             for (i, d) in ts.enumerated() {
                 var a = self.args(p, d, slot: slots[i], upscaled: up.contains(d.id)) + ["--record=\(self.recFiles[i].path)"]
-                if !self.showWhileRecording { a.append("--no-playback") }
+                let live = self.usesLive(d)
+                if !self.showWhileRecording || live { a.append("--no-playback") }
+                if live {
+                    // la vidéo sera recomposée dans le cadre à la fin ; le miroir en direct s'ouvre un peu après le démarrage de l'enregistrement
+                    self.pendingFramed.append((self.recFiles[i], d.name))
+                    if self.showWhileRecording {
+                        let up2 = up.contains(d.id), slot = slots[i]
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                            if running(self.records) { self.startLive(p, d, slot: slot, upscaled: up2, source: "record") }
+                        }
+                    }
+                }
                 jobs.append(a)
             }
             self.recStart = Date()
@@ -739,6 +826,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func capture(_ p: Phone, _ ts: [DisplayInfo], _ st: String) {
+        let frame = frameWanted ? currentFrame : nil
         DispatchQueue.global().async {
             defer { DispatchQueue.main.async { self.photoBusy = false } }
             Thread.sleep(forTimeInterval: 0.5)
@@ -754,6 +842,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 guard data.starts(with: [0x89, 0x50, 0x4E, 0x47]) else { self.setStatus(t("photo.noImage")); return }
                 let file = outDir.appendingPathComponent("ecran_\(d.slug)_\(st).png")
                 do { try data.write(to: file); saved.append(file) } catch { self.setStatus(t("photo.writeFail")); return }
+                if let f = frame, d.role == .rear {
+                    let framed = outDir.appendingPathComponent("ecran_\(d.slug)_\(st)_cadre.png")
+                    if let png = Frames.composePhoto(data, in: f), (try? png.write(to: framed)) != nil { saved.append(framed) }
+                }
             }
             self.setStatus(t("photo.done", saved.map(\.lastPathComponent).joined(separator: ", ")))
             NSWorkspace.shared.activateFileViewerSelecting(saved)
@@ -842,7 +934,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func tick() {
         endUpscaleIfIdle()
-        mirrorBtn.title = running(mirrors) ? t("mirror.stop") : t("mirror.start")
+        exportFramedVideosIfDone()
+        mirrorBtn.title = (running(mirrors) || liveRunning) ? t("mirror.stop") : t("mirror.start")
         if running(records) {
             recBtn.title = t("rec.stop")
             let s = Int(Date().timeIntervalSince(recStart))
@@ -854,15 +947,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    /// Quand l'enregistrement est terminé, recompose chaque vidéo de l'écran arrière dans le cadre.
+    func exportFramedVideosIfDone() {
+        if !running(records) { stopLives(source: "record") }
+        guard !pendingFramed.isEmpty, !framedBusy, !running(records), launchPending == 0, let frame = currentFrame else { return }
+        framedBusy = true
+        let jobs = pendingFramed; pendingFramed = []
+        status.stringValue = t("frame.exporting")
+        func next(_ i: Int, _ done: [String]) {
+            guard i < jobs.count else {
+                framedBusy = false
+                status.stringValue = t("frame.done", done.joined(separator: ", "))
+                return
+            }
+            let src = jobs[i].src
+            guard FileManager.default.fileExists(atPath: src.path) else { return next(i + 1, done) }
+            let dst = src.deletingPathExtension().appendingPathExtension("tmp").deletingPathExtension()
+                .deletingLastPathComponent().appendingPathComponent(src.deletingPathExtension().lastPathComponent + "_cadre.mp4")
+            Frames.exportVideo(from: src, to: dst, frame: frame) { result in
+                switch result {
+                case .success: next(i + 1, done + [dst.lastPathComponent])
+                case .failure(let e):
+                    self.status.stringValue = t("frame.failed", e.localizedDescription)
+                    next(i + 1, done)
+                }
+            }
+        }
+        next(0, [])
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool { true }
     func applicationWillTerminate(_ n: Notification) {
-        mirrors.forEach { stop($0) }; records.forEach { stop($0) }
+        mirrors.forEach { stop($0) }; records.forEach { stop($0) }; lives.forEach { $0.stop() }
         if let s = upscaleSession { resetUpscale(s.serial, s.displayId) }   // jamais laisser le téléphone en ×2
     }
 }
 
 extension Array {
     subscript(safe i: Int) -> Element? { indices.contains(i) ? self[i] : nil }
+}
+
+// Mode de test sans interface : Rear Screen --selftest-frame photo|video <entrée> <sortie> [dossier-du-cadre]
+if CommandLine.arguments.count >= 5, CommandLine.arguments[1] == "--selftest-frame" {
+    let a = CommandLine.arguments
+    let dir = a.count >= 6 ? URL(fileURLWithPath: a[5]) : URL(fileURLWithPath: resources).appendingPathComponent("frames/default")
+    guard let f = Frames.load(dir: dir, id: "test", fallbackName: "test") else { print("cadre introuvable ou invalide : \(dir.path)"); exit(2) }
+    print("cadre : \(Int(f.size.width))×\(Int(f.size.height)), écran \(f.screen)")
+    if a[2] == "photo" {
+        guard let d = try? Data(contentsOf: URL(fileURLWithPath: a[3])), let png = Frames.composePhoto(d, in: f) else { print("échec photo"); exit(1) }
+        try? png.write(to: URL(fileURLWithPath: a[4])); print("OK photo → \(a[4])"); exit(0)
+    } else {
+        let sem = DispatchSemaphore(value: 0); var code: Int32 = 0
+        Frames.exportVideo(from: URL(fileURLWithPath: a[3]), to: URL(fileURLWithPath: a[4]), frame: f) { r in
+            if case .failure(let e) = r { print("échec vidéo : \(e.localizedDescription)"); code = 1 } else { print("OK vidéo → \(a[4])") }
+            sem.signal()
+        }
+        while sem.wait(timeout: .now() + 0.05) == .timedOut { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+        exit(code)
+    }
 }
 
 let app = NSApplication.shared

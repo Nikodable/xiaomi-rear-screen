@@ -1,0 +1,14 @@
+{
+  "name": "Default",
+  "width": 1000,
+  "height": 1400,
+  "background": "transparent",
+  "screen": {
+    "x": 130,
+    "y": 196,
+    "w": 740,
+    "h": 452,
+    "radius": 77
+  },
+  "note": "Zone transparente = \u00e9cran arri\u00e8re (976x596). Les objectifs recouvrent la zone cam\u00e9ra \u00e0 gauche."
+}

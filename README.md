@@ -82,6 +82,7 @@
   - **Record** to MP4 (one file per screen), with or without the live window
   - **Photo**: PNG screenshot of the selected screen(s)
   - Quality presets: Light / Normal / Max (up to 120 fps)
+- 🖼️ **Phone frame** *(optional)*: show the rear screen inside a phone — live, in photos and in videos — with the camera module around it. Always starts on **No frame**; bring your own frame with a small tool ([docs/FRAMES.md](docs/FRAMES.md))
 - 🔍 **HD ×2** *(experimental)*: doubles the rear screen's resolution for sharper text and widgets
 - 📶 Wi-Fi
   - One-click switch from USB to wireless
@@ -125,6 +126,7 @@
 * [macOS install guide & troubleshooting](macos/README.md)
 * [Windows install guide & troubleshooting](windows/README.md)
 * [Changelog](CHANGELOG.md)
+* [Phone frames: use or create your own](docs/FRAMES.md)
 * Something wrong? [Open an issue](https://github.com/Nikodable/xiaomi-rear-screen/issues) and tell us your phone model, your OS and what the app's status line says.
 
 
@@ -143,8 +145,8 @@ The version number lives in the [`VERSION`](VERSION) file. Maintainers: see [doc
 macos/       AppKit app (Swift, built with swiftc) + build script + icon
 windows/     WPF app (C#, .NET) + build script
 i18n/        one text catalog → generates Strings.swift and Strings.cs
-scripts/     fetch-scrcpy.sh · make-icon.py · make-overview.py · make-languages.py · make-mirror.py · release.sh
-docs/        icon, screenshots (captures/, overview.png, languages.png, mirror-rear.png), release notes for maintainers
+scripts/     fetch-scrcpy.sh · make-icon.py · make-overview.py · make-languages.py · make-mirror.py · make-frame.py · make-custom-frame.py · release.sh
+docs/        icon, screenshots, default phone frame (frame/), FRAMES.md, release notes for maintainers
 third_party/ (not committed) downloaded scrcpy builds
 ```
 

@@ -88,6 +88,31 @@ S = {
 "upscale.failed": dict(fr="HD ×2 impossible : {0}", en="HD ×2 failed: {0}", de="HD ×2 nicht möglich: {0}", es="HD ×2 no disponible: {0}", it="HD ×2 non riuscito: {0}", pt="HD ×2 impossível: {0}"),
 "upscale.healed": dict(fr="Un réglage HD ×2 resté actif sur le téléphone a été remis à la normale.", en="An HD ×2 setting left active on the phone was restored to normal.", de="Eine auf dem Telefon aktiv gebliebene HD-×2-Einstellung wurde zurückgesetzt.", es="Un ajuste HD ×2 que seguía activo en el teléfono se ha restablecido.", it="Un'impostazione HD ×2 rimasta attiva sul telefono è stata ripristinata.", pt="Uma definição HD ×2 que ficou ativa no telemóvel foi reposta."),
 
+"frame.label": dict(fr="Cadre", en="Frame", de="Rahmen", es="Marco", it="Cornice", pt="Moldura"),
+"frame.default": dict(fr="Par défaut", en="Default", de="Standard", es="Predeterminado", it="Predefinito", pt="Predefinido"),
+"frame.openFolder": dict(fr="Ouvrir le dossier des cadres…", en="Open frames folder…", de="Rahmen-Ordner öffnen …", es="Abrir la carpeta de marcos…", it="Apri la cartella delle cornici…", pt="Abrir a pasta de molduras…"),
+"frame.none": dict(fr="Aucun cadre", en="No frame", de="Kein Rahmen", es="Sin marco", it="Nessuna cornice", pt="Sem moldura"),
+"frame.tip": dict(
+    fr="Écran arrière uniquement. Chaque photo est enregistrée deux fois (simple et avec cadre). Les vidéos sont recomposées dans le cadre à la fin de l'enregistrement.",
+    en="Rear screen only. Each photo is saved twice (plain and framed). Videos are re-rendered into the frame when the recording ends.",
+    de="Nur Rückdisplay. Jedes Foto wird zweimal gespeichert (normal und mit Rahmen). Videos werden nach der Aufnahme in den Rahmen eingesetzt.",
+    es="Solo pantalla trasera. Cada foto se guarda dos veces (normal y con marco). Los vídeos se recomponen dentro del marco al terminar la grabación.",
+    it="Solo schermo posteriore. Ogni foto viene salvata due volte (normale e con cornice). I video vengono ricomposti nella cornice al termine della registrazione.",
+    pt="Só ecrã traseiro. Cada foto é guardada duas vezes (simples e com moldura). Os vídeos são recompostos na moldura quando a gravação termina."),
+"frame.tip.win": dict(
+    fr="Écran arrière uniquement. Chaque photo est enregistrée deux fois (simple et avec cadre). Les vidéos avec cadre ne sont pas encore disponibles sous Windows.",
+    en="Rear screen only. Each photo is saved twice (plain and framed). Framed videos are not available on Windows yet.",
+    de="Nur Rückdisplay. Jedes Foto wird zweimal gespeichert (normal und mit Rahmen). Videos mit Rahmen sind unter Windows noch nicht verfügbar.",
+    es="Solo pantalla trasera. Cada foto se guarda dos veces (normal y con marco). Los vídeos con marco aún no están disponibles en Windows.",
+    it="Solo schermo posteriore. Ogni foto viene salvata due volte (normale e con cornice). I video con cornice non sono ancora disponibili su Windows.",
+    pt="Só ecrã traseiro. Cada foto é guardada duas vezes (simples e com moldura). Os vídeos com moldura ainda não estão disponíveis no Windows."),
+"frame.exporting": dict(fr="Ajout du cadre à la vidéo…", en="Adding the frame to the video…", de="Rahmen wird zum Video hinzugefügt …", es="Añadiendo el marco al vídeo…", it="Aggiunta della cornice al video…", pt="A adicionar a moldura ao vídeo…"),
+"frame.done": dict(fr="Vidéo avec cadre : {0}", en="Framed video: {0}", de="Video mit Rahmen: {0}", es="Vídeo con marco: {0}", it="Video con cornice: {0}", pt="Vídeo com moldura: {0}"),
+"frame.failed": dict(fr="Cadre impossible : {0}", en="Frame failed: {0}", de="Rahmen nicht möglich: {0}", es="No se pudo aplicar el marco: {0}", it="Cornice non riuscita: {0}", pt="Moldura impossível: {0}"),
+
+"live.close": dict(fr="Fermer", en="Close", de="Schließen", es="Cerrar", it="Chiudi", pt="Fechar"),
+"live.failed": dict(fr="Impossible d'afficher le flux en direct : {0}", en="Couldn't show the live stream: {0}", de="Live-Stream konnte nicht angezeigt werden: {0}", es="No se pudo mostrar el flujo en directo: {0}", it="Impossibile mostrare il flusso in diretta: {0}", pt="Não foi possível mostrar a transmissão em direto: {0}"),
+
 "photo.capturing": dict(fr="Capture en cours…", en="Capturing…", de="Aufnahme läuft …", es="Capturando…", it="Acquisizione in corso…", pt="A capturar…"),
 "photo.noId": dict(fr="Photo impossible : identifiant de l'écran {0} introuvable.", en="Photo failed: ID of screen {0} not found.", de="Foto nicht möglich: Kennung von Display {0} nicht gefunden.", es="No se pudo hacer la foto: identificador de la pantalla {0} no encontrado.", it="Foto non riuscita: identificatore dello schermo {0} non trovato.", pt="Foto impossível: identificador do ecrã {0} não encontrado."),
 "photo.noImage": dict(fr="Photo impossible : le téléphone n'a pas renvoyé d'image (écran éteint ?).", en="Photo failed: the phone returned no image (screen off?).", de="Foto nicht möglich: Das Telefon hat kein Bild geliefert (Display aus?).", es="No se pudo hacer la foto: el teléfono no devolvió ninguna imagen (¿pantalla apagada?).", it="Foto non riuscita: il telefono non ha restituito alcuna immagine (schermo spento?).", pt="Foto impossível: o telemóvel não devolveu nenhuma imagem (ecrã desligado?)."),
