@@ -76,6 +76,30 @@ static class Tools
 
 static class Proc
 {
+    /// Port du serveur adb privé de l'app (le serveur standard, 5037, n'est jamais touché).
+    public const string AdbPort = "5137";
+
+    /// Un AUTRE serveur adb (port 5037) tient-il un téléphone prêt ? Protocole brut en lecture seule : aucune négociation de version,
+    /// donc rien ne peut être coupé chez l'autre outil.
+    public static bool PhoneHeldByOtherAdb()
+    {
+        try
+        {
+            using var c = new System.Net.Sockets.TcpClient();
+            if (!c.ConnectAsync("127.0.0.1", 5037).Wait(1000)) return false;
+            c.ReceiveTimeout = 1000; c.SendTimeout = 1000;
+            var st = c.GetStream();
+            var req = Encoding.ASCII.GetBytes("000chost:devices");
+            st.Write(req, 0, req.Length);
+            var ms = new MemoryStream(); var buf = new byte[4096];
+            int n;
+            while ((n = st.Read(buf, 0, buf.Length)) > 0 && ms.Length < 8192) ms.Write(buf, 0, n);
+            var text = Encoding.UTF8.GetString(ms.ToArray());
+            return text.StartsWith("OKAY") && text.Split('\n').Any(l => l.TrimEnd('\r').EndsWith("\tdevice"));
+        }
+        catch { return false; }
+    }
+
     static ProcessStartInfo Psi(string exe, IEnumerable<string> args, bool redirect)
     {
         var psi = new ProcessStartInfo(exe)
@@ -93,6 +117,7 @@ static class Proc
         }
         foreach (var a in args) psi.ArgumentList.Add(a);
         psi.Environment["ADB"] = Tools.Adb;
+        psi.Environment["ANDROID_ADB_SERVER_PORT"] = AdbPort;   // serveur adb PRIVÉ : les autres outils Android ne peuvent ni le couper ni nous voler le téléphone
         psi.Environment["SCRCPY_SERVER_PATH"] = Tools.Server;
         return psi;
     }
@@ -524,6 +549,7 @@ class MainWindow : Window
         {
             mirrors.ForEach(Proc.Stop); records.ForEach(Proc.Stop);
             if (upscaleSession is { } s) Adb.ResetUpscale(s.Serial, s.DisplayId);   // jamais laisser le téléphone en ×2
+            Proc.Run(Tools.Adb, "kill-server");   // notre serveur privé seulement (port 5137)
         };
     }
 
@@ -732,10 +758,24 @@ class MainWindow : Window
             var knownDisplays = displays.ToList();
             var knownNames = new Dictionary<string, string>(phoneNames);
             var upActive = upscaleSession != null || upscaleBusy;
+            var wasBusy = phoneBusyElsewhere;
+            var streak = noPhoneStreak;
+            var idle = !mirrors.Any(m => !m.HasExited) && !records.Any(m => !m.HasExited);
+            var canRestart = DateTime.UtcNow - lastServerRestart > TimeSpan.FromSeconds(30);
+            var restarted = false;
 
             var r = await Task.Run(() =>
             {
                 var list = Adb.Devices();
+                var busy = !list.Any(p => p.State == "device") && Proc.PhoneHeldByOtherAdb();
+                // Notre serveur ne voit plus le téléphone alors qu'il n'est pas pris ailleurs : l'autre outil vient de le libérer, ou le câble a été
+                // débranché/rebranché sans quitter l'app → après quelques tours à vide, on relance notre serveur (jamais pendant un miroir/enregistrement)
+                if (!list.Any(p => p.State == "device") && !busy && (wasBusy || (streak >= 3 && idle && canRestart)))
+                {
+                    restarted = true;
+                    Proc.Run(Tools.Adb, "kill-server");
+                    list = Adb.Devices();
+                }
                 var names = new Dictionary<string, string>(knownNames);
                 foreach (var p in list.Where(p => p.State == "device"))
                 {
@@ -761,16 +801,23 @@ class MainWindow : Window
                     }
                 }
                 else if (chosen?.State != "device") { found = new(); serial = null; }
-                return (list, names, chosen, found, serial, healed);
+                return (list, names, chosen, found, serial, healed, busy);
             });
 
             foreach (var kv in r.names) phoneNames[kv.Key] = kv.Value;
+            phoneBusyElsewhere = r.busy;
+            if (restarted) lastServerRestart = DateTime.UtcNow;
+            noPhoneStreak = (r.list.Any(p => p.State == "device") || r.busy) ? 0 : noPhoneStreak + 1;
             Apply(r.list, r.chosen, r.found, r.serial);
             if (r.healed) status.Text = I18N.T("upscale.healed");
         }
         catch { /* on réessaiera au prochain tour */ }
         finally { refreshing = false; }
     }
+
+    bool phoneBusyElsewhere;
+    int noPhoneStreak;
+    DateTime lastServerRestart = DateTime.MinValue;
 
     void Apply(List<Phone> list, Phone? chosen, List<DisplayInfo> found, string? serial)
     {
@@ -842,7 +889,7 @@ class MainWindow : Window
     void UpdateStatus()
     {
         var c = SelectedPhone;
-        if (c == null) { status.Text = I18N.T("status.noPhone"); return; }
+        if (c == null) { status.Text = I18N.T(phoneBusyElsewhere ? "status.busy" : "status.noPhone"); return; }
         status.Text = c.State switch
         {
             "device" => displays.Count == 0 ? I18N.T("status.noDisplays") : I18N.T("status.connected"),

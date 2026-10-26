@@ -3,6 +3,12 @@
 All notable changes. Format based on [Keep a Changelog](https://keepachangelog.com/); versions follow [SemVer](https://semver.org/).
 The macOS and Windows apps share one version number.
 
+## [1.3.1] — 2026-10-26
+### Added
+- **Protection against adb conflicts.** The app now runs its own private adb server (port 5137) instead of sharing the standard one (port 5037) with Android Studio, Vysor or another scrcpy. Another tool with a different adb version can no longer cut the connection, and the app never touches anyone else's server. Its own server is stopped when the app quits.
+- **"Phone in use by another tool" message** (6 languages): when another adb server is holding the phone, the app says so, instead of "No phone detected". It checks the standard server read-only, so nothing is disturbed.
+- **Automatic recovery**: as soon as the other tool lets go of the phone, or after the phone was unplugged and replugged while the app stays open, the app restarts its own server and finds the phone again, with no need to relaunch. It never does this during a mirror or recording.
+
 ## [1.3.0] — 2026-10-21
 ### Added
 - **Phone frame** (optional, rear screen only): a *Frame* menu that always starts on **No frame**.

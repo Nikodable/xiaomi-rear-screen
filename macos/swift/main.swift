@@ -8,9 +8,14 @@ let scrcpyPath = resources + "/scrcpy"
 let adbPath = resources + "/adb"
 let outDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Movies/EcranArriere")
 
+/// Serveur adb PRIVÉ de l'app : un autre outil Android (Android Studio, Vysor, un autre scrcpy…) ne peut ni le couper
+/// (versions d'adb différentes) ni nous voler le téléphone, et nous ne touchons jamais à son serveur (port 5037).
+let adbPort = "5137"
+
 func scrcpyEnv() -> [String: String] {
     var env = ProcessInfo.processInfo.environment
     env["ADB"] = adbPath
+    env["ANDROID_ADB_SERVER_PORT"] = adbPort
     env["SCRCPY_SERVER_PATH"] = resources + "/scrcpy-server"
     return env
 }
@@ -29,6 +34,37 @@ func run(_ exe: String, _ args: [String], mergeErr: Bool = true) -> (data: Data,
     let data = pipe.fileHandleForReading.readDataToEndOfFile()
     p.waitUntilExit()
     return (data, String(data: data, encoding: .utf8) ?? "")
+}
+
+/// Un AUTRE serveur adb (port standard 5037) tient-il un téléphone prêt ? Lecture seule par le protocole brut :
+/// aucune négociation de version, donc rien ne peut être coupé chez l'autre outil.
+func phoneHeldByOtherAdb() -> Bool {
+    let fd = socket(AF_INET, SOCK_STREAM, 0)
+    guard fd >= 0 else { return false }
+    defer { close(fd) }
+    var tv = timeval(tv_sec: 1, tv_usec: 0)
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+    var addr = sockaddr_in()
+    addr.sin_family = sa_family_t(AF_INET)
+    addr.sin_port = UInt16(5037).bigEndian
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+    let ok = withUnsafePointer(to: &addr) {
+        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+    }
+    guard ok == 0 else { return false }
+    let req = Array("000chost:devices".utf8)
+    guard send(fd, req, req.count, 0) == req.count else { return false }
+    var buf = [UInt8](repeating: 0, count: 4096)
+    var got = Data()
+    while true {
+        let n = recv(fd, &buf, buf.count, 0)
+        if n <= 0 { break }
+        got.append(contentsOf: buf[0..<n])
+        if got.count > 8192 { break }
+    }
+    let text = String(data: got, encoding: .utf8) ?? ""
+    return text.hasPrefix("OKAY") && text.split(separator: "\n").contains { $0.hasSuffix("\tdevice") }
 }
 
 func spawn(_ args: [String]) -> Process {
@@ -519,6 +555,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func forceRefresh() { displaysSerial = nil; frames = Frames.loadAll(); fillFramePopup(); refresh() }
     @objc func deviceChanged() { displaysSerial = nil; refresh() }
 
+    var phoneBusyElsewhere = false
+    var noPhoneStreak = 0
+    var lastServerRestart = Date.distantPast
+
     @objc func refresh() {
         if refreshing { return }
         refreshing = true
@@ -527,9 +567,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let knownDisplays = displays
         let knownNames = phoneNames
         let upActive = upscaleSession != nil || upscaleBusy
+        let wasBusy = phoneBusyElsewhere
+        let streak = noPhoneStreak
+        let idle = !running(mirrors) && !running(records) && lives.isEmpty
+        let canRestart = Date().timeIntervalSince(lastServerRestart) > 30
         DispatchQueue.global().async {
             var healed = false
             var list = parseDevices(run(adbPath, ["devices", "-l"]).text)
+            var busy = !list.contains { $0.state == "device" } && phoneHeldByOtherAdb()
+            // Notre serveur ne voit plus le téléphone alors qu'il n'est pas pris ailleurs : l'autre outil vient de le libérer, ou le câble a été
+            // débranché/rebranché sans quitter l'app → après quelques tours à vide, on relance notre serveur (jamais pendant un miroir/enregistrement)
+            var restarted = false
+            if !list.contains(where: { $0.state == "device" }) && !busy && ((wasBusy) || (streak >= 3 && idle && canRestart)) {
+                restarted = true
+                run(adbPath, ["kill-server"])
+                list = parseDevices(run(adbPath, ["devices", "-l"]).text)
+                busy = false
+            }
             var names = knownNames
             for i in list.indices where list[i].state == "device" {
                 let serial = list[i].serial
@@ -554,6 +608,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             DispatchQueue.main.async {
                 self.refreshing = false
+                self.phoneBusyElsewhere = busy
+                if restarted { self.lastServerRestart = Date() }
+                self.noPhoneStreak = (list.contains { $0.state == "device" } || busy) ? 0 : self.noPhoneStreak + 1
                 self.phoneNames = names
                 self.apply(list, chosen: chosen, displays: found, serial: serial)
                 if healed { self.status.stringValue = t("upscale.healed") }
@@ -609,7 +666,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func updateStatus() {
-        guard let c = selectedPhone else { status.stringValue = t("status.noPhone"); return }
+        guard let c = selectedPhone else { status.stringValue = t(phoneBusyElsewhere ? "status.busy" : "status.noPhone"); return }
         switch c.state {
         case "device":
             status.stringValue = displays.isEmpty ? t("status.noDisplays") : t("status.connected")
@@ -980,6 +1037,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationWillTerminate(_ n: Notification) {
         mirrors.forEach { stop($0) }; records.forEach { stop($0) }; lives.forEach { $0.stop() }
         if let s = upscaleSession { resetUpscale(s.serial, s.displayId) }   // jamais laisser le téléphone en ×2
+        run(adbPath, ["kill-server"])   // notre serveur privé seulement (port 5137), jamais celui des autres outils
     }
 }
 

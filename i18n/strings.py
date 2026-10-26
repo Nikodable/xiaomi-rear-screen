@@ -24,6 +24,13 @@ S = {
     es="No se detecta ningún teléfono. Comprueba el cable (modo «Transferencia de archivos»), el controlador USB del teléfono y que la depuración USB esté activada en las opciones de desarrollador.",
     it="Nessun telefono rilevato. Controlla il cavo (modalità «Trasferimento file»), il driver USB del telefono e che il debug USB sia attivo nelle opzioni sviluppatore.",
     pt="Nenhum telemóvel detetado. Verifica o cabo (modo «Transferência de ficheiros»), o controlador USB do telemóvel e se a depuração USB está ativada nas opções de programador."),
+"status.busy": dict(
+    fr="Le téléphone est utilisé par un autre outil Android (Android Studio, Vysor, un autre scrcpy…). Ferme-le, ou quitte son serveur adb (commande « adb kill-server »), puis clique sur ↻.",
+    en="The phone is being used by another Android tool (Android Studio, Vysor, another scrcpy…). Close it, or stop its adb server (“adb kill-server” command), then click ↻.",
+    de="Das Telefon wird von einem anderen Android-Tool verwendet (Android Studio, Vysor, ein anderes scrcpy …). Schließe es oder beende dessen adb-Server (Befehl „adb kill-server“) und klicke dann auf ↻.",
+    es="El teléfono lo está usando otra herramienta Android (Android Studio, Vysor, otro scrcpy…). Ciérrala o detén su servidor adb (comando «adb kill-server») y pulsa ↻.",
+    it="Il telefono è in uso da un altro strumento Android (Android Studio, Vysor, un altro scrcpy…). Chiudilo o ferma il suo server adb (comando «adb kill-server»), poi clicca ↻.",
+    pt="O telemóvel está a ser usado por outra ferramenta Android (Android Studio, Vysor, outro scrcpy…). Fecha-a ou pára o seu servidor adb (comando «adb kill-server») e clica em ↻."),
 "status.noDisplays": dict(fr="Téléphone détecté, mais ses écrans sont introuvables. Essaie ↻ ou rebranche-le.", en="Phone detected, but its screens could not be found. Try ↻ or reconnect it.", de="Telefon erkannt, aber die Displays wurden nicht gefunden. Versuche ↻ oder stecke es neu ein.", es="Teléfono detectado, pero no se encuentran sus pantallas. Prueba ↻ o vuelve a conectarlo.", it="Telefono rilevato, ma i suoi schermi non sono stati trovati. Prova ↻ o ricollegalo.", pt="Telemóvel detetado, mas os ecrãs não foram encontrados. Experimenta ↻ ou volta a ligá-lo."),
 "status.connected": dict(fr="Téléphone connecté ✓", en="Phone connected ✓", de="Telefon verbunden ✓", es="Teléfono conectado ✓", it="Telefono connesso ✓", pt="Telemóvel ligado ✓"),
 "status.unauthorized": dict(
